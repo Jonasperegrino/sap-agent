@@ -171,10 +171,45 @@ with st.sidebar:
     route = {"Current page": None, "Dashboard": "dashboard", "Catalog": "catalog", "Orders": "orders"}[route_label]
     st.caption("Credentials are used for this run only.")
 
+    st.divider()
+    st.subheader("AI / LLM (optional)")
+    # Prefill from env/secrets if present, else empty
+    _env_key = _os.environ.get("SAP_AGENT_LLM_API_KEY", "") or _os.environ.get("OPENAI_API_KEY", "")
+    llm_default_model = _os.environ.get("SAP_AGENT_LLM_MODEL", "gpt-4o-mini")
+    llm_api_key_input = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value="",
+        placeholder="sk-..." if not _env_key else "using key from secrets",
+        help="For aggregate questions (e.g. revenue of top 3 clients). Leave empty for deterministic mode. Not stored.",
+    )
+    llm_model_input = st.text_input(
+        "Model",
+        value=llm_default_model,
+        placeholder="gpt-4o-mini",
+        help="OpenAI model for intent parsing",
+    )
+    llm_base_url_input = st.text_input(
+        "Base URL (optional)",
+        value=_os.environ.get("SAP_AGENT_LLM_BASE_URL", ""),
+        placeholder="https://api.openai.com/v1",
+        help="Override for OpenAI-compatible endpoints",
+    )
+    if _env_key and not llm_api_key_input:
+        st.caption("🔑 API key from secrets/env active")
+    elif llm_api_key_input:
+        st.caption(f"🔑 Using key …{llm_api_key_input[-4:]} for this run")
+    else:
+        st.caption("Deterministic mode — aggregate queries may be unsupported")
+
 tab_ask, tab_reports = st.tabs(["Ask", "Reports"])
 
 with tab_ask:
-    question = st.text_area("Question", placeholder="How many orders were placed in 2026?", height=110)
+    question = st.text_area(
+        "Question",
+        placeholder="How many orders were placed in 2026?\nWith AI: revenue of top 3 clients last year",
+        height=110,
+    )
     ask = st.button("Ask the agent", type="primary", use_container_width=True, key="ask_btn")
     if ask:
         if not question.strip():
@@ -193,6 +228,19 @@ with tab_ask:
                 cfg = Config.from_env(app_url=app_url, username=username, password=password)
                 cfg.login_timeout_ms = 8000
                 cfg.retry_budget = 1
+                # Inject sidebar LLM key if provided (overrides env/secrets)
+                if llm_api_key_input.strip():
+                    from pydantic import SecretStr
+
+                    cfg.llm_api_key = SecretStr(llm_api_key_input.strip())
+                    if llm_model_input.strip():
+                        cfg.llm_model = llm_model_input.strip()
+                    if llm_base_url_input.strip():
+                        cfg.llm_base_url = llm_base_url_input.strip().rstrip("/")
+                elif llm_model_input.strip() != cfg.llm_model:
+                    cfg.llm_model = llm_model_input.strip()
+                if llm_base_url_input.strip():
+                    cfg.llm_base_url = llm_base_url_input.strip().rstrip("/")
                 try:
                     with st.spinner("Logging in and inspecting the app…"):
                         res = run_question(cfg, question.strip(), route)
@@ -203,12 +251,20 @@ with tab_ask:
     res: RunResult | None = st.session_state.get("last_result")
     if res and res.answer:
         a = res.answer
+        _llm_used = any("llm" in str(t.get("tool", "")) + str(t.get("action", "")) for t in (res.trace or []))
         if a.unsupported:
             st.warning(a.message or "Question not supported.")
+            if not _llm_used and not _env_key and not llm_api_key_input.strip():
+                st.info(
+                    "💡 Tip: aggregate questions (e.g. revenue of top 3 clients) "
+                    "need an OpenAI API key — add it in the sidebar under AI / LLM."
+                )
         elif a.not_found:
             st.info(a.message or "No matching rows found.")
         else:
             st.success(f"Answer: {a.answer}")
+            if _llm_used:
+                st.caption("🧠 AI-parsed intent")
         c1, c2, c3 = st.columns(3)
         c1.metric("Confidence", a.confidence)
         c2.metric("Matched rows", a.evidence.matched_rows)
