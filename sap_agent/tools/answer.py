@@ -25,6 +25,23 @@ from .reason import parse_question, parse_question_with_llm
 
 OBJECT_STATUS_NOISE = "Object Status"
 
+# auto-route inference: which page holds the column
+_CUSTOMERS_COLS = {"contact", "email", "phone", "industry", "city", "country", "creditrating", "since", "location"}
+_CATALOG_COLS = {"category", "price", "stock", "unit"}
+
+
+def _infer_auto_route(intent: IntentConfig) -> str | None:
+    col = (intent.column or "").lower()
+    grp = (intent.group_by or "").lower()
+    # direct column mapping
+    if col in _CUSTOMERS_COLS or grp in _CUSTOMERS_COLS:
+        return "customers"
+    if col in _CATALOG_COLS or grp in _CATALOG_COLS:
+        return "catalog"
+    # name is ambiguous — check value looks like product vs customer
+    # keep dashboard for sales-related (customer, amount, status, built)
+    return None
+
 
 @dataclass(frozen=True)
 class _TableSnapshot:
@@ -119,10 +136,12 @@ def _aggregate_top(
     snapshot: _TableSnapshot | None = None,
     network_rows: list[dict] | None = None,
 ) -> AnsweredQuestion | None:
-    """Handle AGGREGATE: sum/avg grouped + ranked. Prefers network_rows (precise numeric)."""
+    """Handle AGGREGATE: sum/avg/count grouped + ranked. Prefers network_rows (precise numeric)."""
     agg_col = _resolve_json_key(intent.aggregation_column or intent.column or "amount")
     group_key = _resolve_json_key(intent.group_by or "customer")
-    if not agg_col or not group_key:
+    is_count = intent.aggregation == "count"
+    # count doesn't need agg_col, sum/avg do
+    if not group_key or (not is_count and not agg_col):
         return AnsweredQuestion(
             question=question,
             intent=QuestionIntent.AGGREGATE,
@@ -164,9 +183,15 @@ def _aggregate_top(
             g = str(rec.get(group_key, "")).strip()
             if not g:
                 continue
-            totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
+            if is_count:
+                totals[g] = totals.get(g, 0.0) + 1
+            else:
+                totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
         ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
-        answer = [{"customer": k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
+        if is_count:
+            answer = [{"customer": k, "count": int(v)} for k, v in ranked]
+        else:
+            answer = [{"customer": k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
         if not answer:
             return AnsweredQuestion(
                 question=question,
@@ -201,10 +226,16 @@ def _aggregate_top(
         g = str(rec.get(group_key, "")).strip()
         if not g:
             continue
-        val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
-        totals[g] = totals.get(g, 0.0) + val
+        if is_count:
+            totals[g] = totals.get(g, 0.0) + 1
+        else:
+            val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
+            totals[g] = totals.get(g, 0.0) + val
     ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
-    answer = [{"customer": k, "revenue": round(v, 2)} for k, v in ranked]
+    if is_count:
+        answer = [{"customer": k, "count": int(v)} for k, v in ranked]
+    else:
+        answer = [{"customer": k, "revenue": round(v, 2)} for k, v in ranked]
     if not answer:
         return AnsweredQuestion(
             question=question,
@@ -425,9 +456,18 @@ def evaluate_question(
             ctx,
         )
 
+    # auto-route when no explicit route (Streamlit) — infer page from intent
     if route is not None and current_route(page) != "#/" + route:
         navigate(page, route, app_url)
         ctx.record("nav", f"navigate.{route}", outcome="landed", url=page.url)
+    elif route is None:
+        auto = _infer_auto_route(intent)
+        if auto and current_route(page) != f"#/{auto}":
+            try:
+                navigate(page, auto, app_url)
+                ctx.record("nav", f"navigate.{auto}", outcome="auto", url=page.url)
+            except Exception:
+                pass
 
     snapshot = _snapshot(page, ctx)
 

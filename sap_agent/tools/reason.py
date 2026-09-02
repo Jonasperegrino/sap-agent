@@ -181,6 +181,64 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
     return None
 
 
+def _parse_amount_orders(question: str) -> IntentConfig | None:
+    lowered = question.lower()
+    has_amount = "amount" in lowered or "revenue" in lowered
+    has_orders = "orders" in lowered or "order" in lowered
+
+    # orders by customer — count per customer
+    if has_orders and ("by customer" in lowered or "per customer" in lowered):
+        return IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="count",
+            group_by="customer",
+            limit=10,
+        )
+    # amount/revenue by customer — sum per customer
+    if has_amount and ("by customer" in lowered or "per customer" in lowered):
+        return IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="sum",
+            aggregation_column="amount",
+            group_by="customer",
+            limit=10,
+        )
+    # total amount for specific customer — sum for that customer
+    if has_amount and ("for" in lowered or "of" in lowered):
+        # try known customer first
+        for cust in KNOWN_CUSTOMERS:
+            if cust in lowered:
+                idx = lowered.find(cust)
+                raw = question[idx : idx + len(cust)].strip().strip("?.!")
+                if not raw:
+                    raw = cust
+                return IntentConfig(
+                    intent=QuestionIntent.AGGREGATE,
+                    aggregation="sum",
+                    aggregation_column="amount",
+                    column="customer",
+                    value=raw.strip(),
+                    comparer="exact",
+                    group_by="customer",
+                )
+        # fallback via LAST separator
+        m = COUNT_WHERE_VALUE.search(question.strip())
+        if m:
+            raw_value = m.group(1).strip().strip("?.!")
+            raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+            if raw_value and _looks_like_customer(raw_value):
+                return IntentConfig(
+                    intent=QuestionIntent.AGGREGATE,
+                    aggregation="sum",
+                    aggregation_column="amount",
+                    column="customer",
+                    value=raw_value,
+                    comparer="exact",
+                    group_by="customer",
+                )
+    return None
+
+
 def parse_question(question: str) -> IntentConfig:
     lowered = question.lower().strip()
     if not lowered:
@@ -191,6 +249,11 @@ def parse_question(question: str) -> IntentConfig:
     contact_cfg = _parse_contact_lookup(question)
     if contact_cfg is not None:
         return contact_cfg
+
+    # amount/orders by customer — deterministic aggregate without LLM
+    amount_cfg = _parse_amount_orders(question)
+    if amount_cfg is not None:
+        return amount_cfg
 
     for pattern in EXISTENCE_PATTERNS:
         if pattern.search(lowered):

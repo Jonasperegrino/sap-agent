@@ -413,7 +413,7 @@ class Config(BaseModel):
     success_route: str | None = None
     #: LLM slot (issue #647 extension): OpenAI-compatible API for intent parsing
     llm_api_key: SecretStr | None = None
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-5"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_provider: str = "openai"  # openai | anthropic | openai-compatible
     llm_timeout_s: float = Field(default=15.0, ge=1.0)

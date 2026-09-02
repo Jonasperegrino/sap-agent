@@ -21,8 +21,8 @@ from sap_agent.tools.llm import (
 
 class TestPayloadOpenAI:
     def test_returns_correct_structure(self) -> None:
-        payload = _payload_openai("how many orders?", "gpt-4o-mini")
-        assert payload["model"] == "gpt-4o-mini"
+        payload = _payload_openai("how many orders?", "gpt-5")
+        assert payload["model"] == "gpt-5"
         assert payload["temperature"] == 0
         assert payload["response_format"] == {"type": "json_object"}
         assert len(payload["messages"]) == 2

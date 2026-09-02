@@ -190,24 +190,13 @@ with st.sidebar:
     username = st.text_input("Username", value="demo")
     password = st.text_input("Password", type="password", value="password123")
     st.caption("Demo: demo / password123")
-    route_label = st.selectbox(
-        "Answer against", ["Current page", "Dashboard", "Customers", "Catalog", "Orders", "Customer detail"]
-    )
-    route = {
-        "Current page": None,
-        "Dashboard": "dashboard",
-        "Customers": "customers",
-        "Catalog": "catalog",
-        "Orders": "orders",
-        "Customer detail": "customer",
-    }[route_label]
-    st.caption("Credentials are used for this run only.")
+    st.caption("Credentials are used for this run only. Agent auto-finds the right page.")
 
     st.divider()
     st.subheader("AI / LLM (optional)")
     # Prefill from env/secrets if present, else empty
     _env_key = _os.environ.get("SAP_AGENT_LLM_API_KEY", "") or _os.environ.get("OPENAI_API_KEY", "")
-    llm_default_model = _os.environ.get("SAP_AGENT_LLM_MODEL", "gpt-4o-mini")
+    llm_default_model = _os.environ.get("SAP_AGENT_LLM_MODEL", "gpt-5")
     llm_api_key_input = st.text_input(
         "OpenAI API Key",
         type="password",
@@ -218,7 +207,7 @@ with st.sidebar:
     llm_model_input = st.text_input(
         "Model",
         value=llm_default_model,
-        placeholder="gpt-4o-mini",
+        placeholder="gpt-5",
         help="OpenAI model for intent parsing",
     )
     llm_base_url_input = st.text_input(
@@ -275,7 +264,7 @@ with tab_ask:
                     cfg.llm_base_url = llm_base_url_input.strip().rstrip("/")
                 try:
                     with st.spinner("Logging in and inspecting the app…"):
-                        res = run_question(cfg, question.strip(), route)
+                        res = run_question(cfg, question.strip(), None)
                     st.session_state["last_result"] = res
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Agent crashed: {e}")
