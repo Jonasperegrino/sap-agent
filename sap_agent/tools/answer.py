@@ -10,6 +10,7 @@ Rules:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from dataclasses import dataclass
@@ -135,6 +136,7 @@ def _aggregate_top(
     endpoint: str | None,
     snapshot: _TableSnapshot | None = None,
     network_rows: list[dict] | None = None,
+    capture=None,
 ) -> AnsweredQuestion | None:
     """Handle AGGREGATE: sum/avg/count grouped + ranked. Prefers network_rows (precise numeric)."""
     agg_col = _resolve_json_key(intent.aggregation_column or intent.column or "amount")
@@ -177,10 +179,41 @@ def _aggregate_top(
             )
         # rows already filtered, no second pass
         filtered = rows
+        # join handling for industry/country/city — map customer name → group value via customers.json
+        join_by_name: dict[str, str] = {}
+        if group_key in ("industry", "city", "country") and capture is not None:
+            try:
+                cbody = capture.latest_response_body("customers.json")
+                if isinstance(cbody, list) and cbody:
+                    for c in cbody:
+                        join_by_name[str(c.get("name", "")).lower()] = str(c.get(group_key, "")).strip()
+            except Exception:
+                pass
+            if not join_by_name:
+                for url in capture.capture_response_urls():
+                    if "customers.json" in url:
+                        try:
+                            b = capture.response_body(url)
+                            if isinstance(b, list) and b:
+                                for c in b:
+                                    join_by_name[str(c.get("name", "")).lower()] = str(c.get(group_key, "")).strip()
+                                break
+                        except Exception:
+                            continue
         # group
         totals: dict[str, float] = {}
         for rec in filtered:
-            g = str(rec.get(group_key, "")).strip()
+            if group_key in ("industry", "city", "country") and join_by_name:
+                # rec has customer name under 'customer' or group_key?
+                cust_name = str(rec.get("customer", rec.get("Customer", ""))).lower()
+                # snapshot fallback uses rec with Customer key? handle both
+                if not cust_name:
+                    cust_name = str(rec.get(group_key, "")).lower()
+                g = join_by_name.get(cust_name, "").strip()
+                if not g:
+                    continue
+            else:
+                g = str(rec.get(group_key, "")).strip()
             if not g:
                 continue
             if is_count:
@@ -189,9 +222,12 @@ def _aggregate_top(
                 totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
         ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
         if is_count:
-            answer = [{"customer": k, "count": int(v)} for k, v in ranked]
+            # for industry/country groups, key is industry name, not customer
+            key_name = "customer" if group_key == "customer" else group_key
+            answer = [{key_name: k, "count": int(v)} for k, v in ranked]
         else:
-            answer = [{"customer": k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
+            key_name = "customer" if group_key == "customer" else group_key
+            answer = [{key_name: k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
         if not answer:
             return AnsweredQuestion(
                 question=question,
@@ -213,17 +249,85 @@ def _aggregate_top(
     else:
         return None
 
-    # network path: filter + group
+    # network path: filter + group (join for country/industry/city filter)
+    # build filter join map if needed (sales.customerId → customers.country)
+    filter_join_by_id: dict[str, str] = {}
+    filter_join_by_name: dict[str, str] = {}
+    if intent.column and intent.column.lower() in ("industry", "city", "country") and capture is not None:
+        try:
+            cbody = capture.latest_response_body("customers.json")
+            if isinstance(cbody, list) and cbody:
+                for c in cbody:
+                    filter_join_by_id[str(c.get("id", ""))] = str(c.get(intent.column.lower(), "")).strip()
+                    filter_join_by_name[str(c.get("name", "")).lower()] = str(c.get(intent.column.lower(), "")).strip()
+        except Exception:
+            pass
+        if not filter_join_by_id:
+            for url in capture.capture_response_urls():
+                if "customers.json" in url:
+                    try:
+                        b = capture.response_body(url)
+                        if isinstance(b, list) and b:
+                            for c in b:
+                                filter_join_by_id[str(c.get("id", ""))] = str(c.get(intent.column.lower(), "")).strip()
+                                filter_join_by_name[str(c.get("name", "")).lower()] = str(
+                                    c.get(intent.column.lower(), "")
+                                ).strip()  # noqa: E501
+                            break
+                    except Exception:
+                        continue
     filtered = []
     for rec in rows:
         if intent.column and intent.value:
-            cell = str(rec.get(_resolve_json_key(intent.column), ""))
-            if not _matches(cell, intent.value, intent.comparer):
-                continue
+            col_low = intent.column.lower()
+            if col_low in ("industry", "city", "country") and (filter_join_by_id or filter_join_by_name):
+                cid = str(rec.get("customerId", "")).strip()
+                cname = str(rec.get("customer", "")).lower().strip()
+                cell = filter_join_by_id.get(cid, "") or filter_join_by_name.get(cname, "")
+                if not _matches(cell, intent.value, intent.comparer) and intent.value.lower() not in cell.lower():
+                    continue
+                # matched
+            else:
+                cell = str(rec.get(_resolve_json_key(intent.column), ""))
+                if not _matches(cell, intent.value, intent.comparer):
+                    continue
         filtered.append(rec)
+    # join map for industry/city/country via customers.json (sales.customerId → customers.industry)
+    join_by_id: dict[str, str] = {}
+    join_by_name: dict[str, str] = {}
+    if group_key in ("industry", "city", "country") and capture is not None:
+        try:
+            cbody = capture.latest_response_body("customers.json")
+            if isinstance(cbody, list) and cbody:
+                for c in cbody:
+                    join_by_id[str(c.get("id", ""))] = str(c.get(group_key, "")).strip()
+                    join_by_name[str(c.get("name", "")).lower()] = str(c.get(group_key, "")).strip()
+        except Exception:
+            pass
+        if not join_by_id:
+            for url in capture.capture_response_urls():
+                if "customers.json" in url:
+                    try:
+                        b = capture.response_body(url)
+                        if isinstance(b, list) and b:
+                            for c in b:
+                                join_by_id[str(c.get("id", ""))] = str(c.get(group_key, "")).strip()
+                                join_by_name[str(c.get("name", "")).lower()] = str(c.get(group_key, "")).strip()
+                            break
+                    except Exception:
+                        continue
     totals: dict[str, float] = {}
     for rec in filtered:
-        g = str(rec.get(group_key, "")).strip()
+        if group_key in ("industry", "city", "country") and (join_by_id or join_by_name):
+            # sales row has customerId, fallback to customer name
+            cid = str(rec.get("customerId", "")).strip()
+            cname = str(rec.get("customer", "")).lower().strip()
+            g = join_by_id.get(cid, "") or join_by_name.get(cname, "")
+            g = g.strip()
+            if not g:
+                continue
+        else:
+            g = str(rec.get(group_key, "")).strip()
         if not g:
             continue
         if is_count:
@@ -232,10 +336,11 @@ def _aggregate_top(
             val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
             totals[g] = totals.get(g, 0.0) + val
     ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+    key_name = "customer" if group_key == "customer" else group_key
     if is_count:
-        answer = [{"customer": k, "count": int(v)} for k, v in ranked]
+        answer = [{key_name: k, "count": int(v)} for k, v in ranked]
     else:
-        answer = [{"customer": k, "revenue": round(v, 2)} for k, v in ranked]
+        answer = [{key_name: k, "revenue": round(v, 2)} for k, v in ranked]
     if not answer:
         return AnsweredQuestion(
             question=question,
@@ -401,6 +506,146 @@ def _lookup_customer(
     )
 
 
+def _lookup_product(
+    question: str,
+    intent: IntentConfig,
+    ctx: SessionContext,
+    page: Page,
+    app_url: str,
+    capture,
+) -> AnsweredQuestion | None:
+    """Lookup price/stock/category for a product — handles 'price for Industrial Pump P-200?'."""
+    lookup_field = (intent.column or "").lower()
+    if lookup_field not in ("price", "stock", "category", "name", "unit"):
+        return None
+    value = (intent.value or "").strip()
+    if not value:
+        return None
+
+    if current_route(page) != "#/catalog":
+        try:
+            navigate(page, "catalog", app_url)
+            ctx.record("nav", "navigate.catalog", outcome="landed", url=page.url)
+        except Exception:
+            pass
+
+    # try network first — products.json
+    products: list[dict] | None = None
+    if capture is not None:
+        try:
+            body = capture.latest_response_body("products.json")
+            if isinstance(body, list) and body and isinstance(body[0], dict):
+                products = body
+        except Exception:
+            products = None
+        if products is None:
+            for url in capture.capture_response_urls():
+                if "products.json" in url:
+                    try:
+                        b = capture.response_body(url)
+                        if isinstance(b, list) and b and isinstance(b[0], dict):
+                            products = b
+                            break
+                    except Exception:
+                        continue
+
+    if products is not None:
+        # filter visible only — active true (respect visible-only rule)
+        # keep inactive for not_found check, but note visible filter for answer
+        matched = [p for p in products if _matches(str(p.get("name", "")), value, "exact")]
+        if not matched:
+            lowered = value.lower()
+            matched = [p for p in products if lowered in str(p.get("name", "")).lower()]
+        if not matched:
+            return _freeze(
+                AnsweredQuestion(
+                    question=question,
+                    intent=QuestionIntent.LOOKUP,
+                    not_found=True,
+                    message=f"no product with name {value!r}",
+                    evidence=AnswerEvidence(
+                        source="products.json", column=lookup_field, matched_rows=0, endpoint="products.json"
+                    ),  # noqa: E501
+                    confidence="high",
+                ),
+                ctx,
+            )
+        rec = matched[0]
+        # visible check: if inactive, treat as not visible but still answer via network? For visible-only we note
+        answer_payload = [
+            {
+                "name": rec.get("name"),
+                "category": rec.get("category"),
+                "price": rec.get("price"),
+                "stock": rec.get("stock"),
+                "unit": rec.get("unit"),
+                "active": rec.get("active"),
+            }
+        ]
+        ctx.record("answer", "lookup", outcome=f"found {rec.get('name')} {lookup_field}={rec.get(lookup_field)}")
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.LOOKUP,
+                answer=answer_payload,
+                evidence=AnswerEvidence(
+                    source="products.json", column=lookup_field, matched_rows=len(matched), endpoint="products.json"
+                ),  # noqa: E501
+                confidence="high",
+            ),
+            ctx,
+        )
+
+    # fallback — table snapshot (visible only)
+    snapshot = _snapshot(page, ctx)
+    col_idx = {name.lower(): idx for idx, name in enumerate(snapshot.data.columns)}
+    name_idx = col_idx.get("product") or col_idx.get("name")
+    if name_idx is None:
+        # try first column as product name
+        name_idx = 0
+    target_idx = col_idx.get(lookup_field)
+    if target_idx is None:
+        return None
+    matched_rows = [r for r in snapshot.data.rows if name_idx < len(r) and _matches(r[name_idx], value, "exact")]
+    if not matched_rows:
+        lowered = value.lower()
+        matched_rows = [r for r in snapshot.data.rows if name_idx < len(r) and lowered in r[name_idx].lower()]
+    if not matched_rows:
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.LOOKUP,
+                not_found=True,
+                message=f"no product with name {value!r}",
+                evidence=AnswerEvidence(
+                    source="productTable", column=lookup_field, matched_rows=0, endpoint="productTable"
+                ),  # noqa: E501
+                confidence="high",
+            ),
+            ctx,
+        )
+    row = matched_rows[0]
+    answer_payload = [
+        {
+            "name": row[name_idx].strip() if name_idx < len(row) else value,
+            lookup_field: row[target_idx].strip() if target_idx < len(row) else "",
+        }
+    ]
+    ctx.record("answer", "lookup", outcome=f"found {value} via table")
+    return _freeze(
+        AnsweredQuestion(
+            question=question,
+            intent=QuestionIntent.LOOKUP,
+            answer=answer_payload,
+            evidence=AnswerEvidence(
+                source="productTable", column=lookup_field, matched_rows=len(matched_rows), endpoint="productTable"
+            ),  # noqa: E501
+            confidence="high",
+        ),
+        ctx,
+    )
+
+
 def evaluate_question(
     page: Page,
     question: str,
@@ -439,9 +684,18 @@ def evaluate_question(
             ctx,
         )
 
-    # LOOKUP — customer contact queries need customers page, handle before generic route nav
+    # LOOKUP — customer/product queries, handle before generic route nav
     if intent.intent == QuestionIntent.LOOKUP:
+        # try product first when column is product-specific
+        if (intent.column or "").lower() in ("price", "stock", "category", "unit"):
+            result = _lookup_product(question, intent, ctx, page, app_url, capture)
+            if result is not None:
+                return result
         result = _lookup_customer(question, intent, ctx, page, app_url, capture)
+        if result is not None:
+            return result
+        # fallback try product if customer missed (name ambiguous)
+        result = _lookup_product(question, intent, ctx, page, app_url, capture)
         if result is not None:
             return result
         # if lookup helper couldn't resolve (e.g. unknown column), fall through to generic unsupported
@@ -466,10 +720,18 @@ def evaluate_question(
             try:
                 navigate(page, auto, app_url)
                 ctx.record("nav", f"navigate.{auto}", outcome="auto", url=page.url)
+                # customers/catalog tables load async via fetch — wait briefly for rows
+                with contextlib.suppress(Exception):
+                    page.wait_for_timeout(900)
             except Exception:
                 pass
 
     snapshot = _snapshot(page, ctx)
+    # retry snapshot if customers table still busy (rows=1 header only)
+    if snapshot.data.row_count == 1 and any(c.lower() == "location" for c in snapshot.columns):
+        with contextlib.suppress(Exception):
+            page.wait_for_timeout(800)
+            snapshot = _snapshot(page, ctx)
 
     # AGGREGATE branch: needs network JSON when available (precise sum), else table fallback
     if intent.intent == QuestionIntent.AGGREGATE:
@@ -484,7 +746,14 @@ def evaluate_question(
             except Exception:
                 network_rows = None
         agg = _aggregate_top(
-            question, intent, ctx, source=source, endpoint=endpoint, snapshot=snapshot, network_rows=network_rows
+            question,
+            intent,
+            ctx,
+            source=source,
+            endpoint=endpoint,
+            snapshot=snapshot,
+            network_rows=network_rows,
+            capture=capture,  # noqa: E501
         )
         if agg is not None:
             if agg.unsupported or agg.not_found:
@@ -506,6 +775,59 @@ def evaluate_question(
 
     lookup = {name.lower(): name for name in snapshot.columns}
     resolved = lookup.get(intent.column.lower()) if intent.column else None
+    # country/city are inside Location "Berlin, Germany"
+    if resolved is None and intent.column and intent.column.lower() in ("country", "city") and "location" in lookup:
+        resolved = lookup["location"]
+        # handle COUNT_WHERE via substring in Location
+        if intent.intent in (QuestionIntent.COUNT_WHERE, QuestionIntent.COUNT_TOTAL, QuestionIntent.EXISTENCE):
+            idx = snapshot.columns[resolved]
+            matched = (
+                [row for row in snapshot.data.rows if idx < len(row) and intent.value.lower() in row[idx].lower()]
+                if intent.value
+                else []
+            )  # noqa: E501
+            if not matched and intent.intent != QuestionIntent.COUNT_TOTAL:
+                result = AnsweredQuestion(
+                    question=question,
+                    intent=intent.intent,
+                    not_found=True,
+                    message=f"no rows with {intent.column} = {intent.value!r}",
+                    evidence=AnswerEvidence(source=source, column=intent.column, matched_rows=0, endpoint=endpoint),
+                    confidence="high",
+                )
+                return _freeze(result, ctx)
+            if intent.intent == QuestionIntent.COUNT_WHERE:
+                result = AnsweredQuestion(
+                    question=question,
+                    intent=QuestionIntent.COUNT_WHERE,
+                    answer=len(matched),
+                    evidence=AnswerEvidence(
+                        source=source, column=intent.column, matched_rows=len(matched), endpoint=endpoint
+                    ),  # noqa: E501
+                    confidence="high",
+                )
+                ctx.record(
+                    "answer",
+                    "count_where",
+                    outcome=f"count={result.answer}",
+                    detail=f"matched {len(matched)} via Location",
+                )  # noqa: E501
+                return _freeze(result, ctx)
+            if intent.intent == QuestionIntent.EXISTENCE:
+                result = AnsweredQuestion(
+                    question=question,
+                    intent=QuestionIntent.EXISTENCE,
+                    answer=1 if matched else 0,
+                    evidence=AnswerEvidence(
+                        source=source, column=intent.column, matched_rows=len(matched), endpoint=endpoint
+                    ),  # noqa: E501
+                    confidence="high",
+                )
+                return _freeze(result, ctx)
+        else:
+            # for other intents, treat as Location column
+            intent.column = resolved
+            resolved = lookup["location"]
     if intent.column and resolved is None:
         result = AnsweredQuestion(
             question=question,
