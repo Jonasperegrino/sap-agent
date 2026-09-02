@@ -47,9 +47,10 @@ WHO_CONTACT_RE = re.compile(
 STATUS_VALUE_WORDS: tuple[str, ...] = ("approved", "pending", "shipped", "rejected", "cancelled")
 
 COUNT_TOTAL_PATTERNS = (
-    re.compile(r"how many (?:orders|rows|entries|sales orders|records|products|customers|items)\b"),
-    re.compile(r"\btotal (?:orders|rows|entries|products|customers|items)\b"),
-    re.compile(r"count (?:of )?(?:orders|rows|entries|products|customers|items)\b"),
+    re.compile(r"how many (?:orders?|rows?|entries|sales orders?|records|products?|customers?|items?)\b"),
+    re.compile(r"\btotal (?:orders?|rows?|entries|products?|customers?|items?)\b"),
+    re.compile(r"count (?:of )?(?:orders?|rows?|entries|products?|customers?|items?)\b"),
+    re.compile(r"number of (?:orders?|rows?|entries|sales orders?|records|products?|customers?|items?)\b"),
 )
 
 EXISTENCE_PATTERNS = (
