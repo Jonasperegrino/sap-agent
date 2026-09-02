@@ -1,5 +1,3 @@
-# System deps for Playwright chromium on Streamlit Cloud (Debian)
-# Streamlit Cloud installs these via apt before pip. Keep minimal.
 libnss3
 libnspr4
 libatk1.0-0
