@@ -139,7 +139,6 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
             raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
             if not raw_value:
                 continue
-            # normalize: if value looks like customer, treat as lookup for that customer
             column = "contact"
             if "email" in lowered:
                 column = "email"
@@ -151,6 +150,34 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
                 value=raw_value,
                 comparer="exact",
             )
+    # fallback 1: known customer name appears anywhere when contact is mentioned
+    for cust in KNOWN_CUSTOMERS:
+        if cust in lowered:
+            idx = lowered.find(cust)
+            # preserve original casing from question if possible
+            raw = question[idx : idx + len(cust)].strip().strip("?.!")
+            if not raw:
+                raw = cust
+            # title-case for display: Acme Corp vs acme corp
+            raw = raw.strip()
+            column = "contact"
+            if "email" in lowered:
+                column = "email"
+            elif "phone" in lowered:
+                column = "phone"
+            return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw, comparer="exact")
+    # fallback 2: use LAST separator heuristic (same as COUNT_WHERE) when contact present
+    m = COUNT_WHERE_VALUE.search(question.strip())
+    if m:
+        raw_value = m.group(1).strip().strip("?.!")
+        raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+        if raw_value and (_looks_like_customer(raw_value) or len(raw_value.split()) <= 3):
+            column = "contact"
+            if "email" in lowered:
+                column = "email"
+            elif "phone" in lowered:
+                column = "phone"
+            return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw_value, comparer="exact")
     return None
 
 
