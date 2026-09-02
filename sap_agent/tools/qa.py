@@ -23,7 +23,7 @@ from .network import NetworkCapture
 from .screenshot import capture_page
 from .ux_critique import critique_ux
 
-QA_ROUTES: tuple[str, ...] = ("dashboard", "catalog", "orders")
+QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
 
 
 def _performance_hints(page: Page) -> list[str]:

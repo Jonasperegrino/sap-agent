@@ -16,6 +16,7 @@ from ..ui5.bridge import current_route
 #: top-level routes and their nav-bar button labels (NavBar.fragment.xml)
 NAV_BUTTON_TEXTS: dict[str, str] = {
     "dashboard": "Dashboard",
+    "customers": "Customers",
     "catalog": "Catalog",
     "orders": "Order History",
 }
@@ -24,6 +25,7 @@ NAV_BUTTON_TEXTS: dict[str, str] = {
 #: the target view swapped in (navbar button text is always visible)
 PAGE_TITLES: dict[str, str] = {
     "dashboard": "Sales Dashboard",
+    "customers": "Customers",
     "catalog": "Product Catalog",
     "orders": "Order History",
     "customer": "Customer Details",

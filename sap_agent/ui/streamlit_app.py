@@ -190,8 +190,17 @@ with st.sidebar:
     username = st.text_input("Username", value="demo")
     password = st.text_input("Password", type="password", value="password123")
     st.caption("Demo: demo / password123")
-    route_label = st.selectbox("Answer against", ["Current page", "Dashboard", "Catalog", "Orders"])
-    route = {"Current page": None, "Dashboard": "dashboard", "Catalog": "catalog", "Orders": "orders"}[route_label]
+    route_label = st.selectbox(
+        "Answer against", ["Current page", "Dashboard", "Customers", "Catalog", "Orders", "Customer detail"]
+    )
+    route = {
+        "Current page": None,
+        "Dashboard": "dashboard",
+        "Customers": "customers",
+        "Catalog": "catalog",
+        "Orders": "orders",
+        "Customer detail": "customer",
+    }[route_label]
     st.caption("Credentials are used for this run only.")
 
     st.divider()
@@ -285,7 +294,19 @@ with tab_ask:
         elif a.not_found:
             st.info(a.message or "No matching rows found.")
         else:
-            st.success(f"Answer: {a.answer}")
+            # nice rendering for customer lookup
+            if a.intent.value == "lookup" and isinstance(a.answer, list) and a.answer:
+                rec = a.answer[0]
+                st.success(
+                    f"Contact for {rec.get('customer', '')}: "
+                    f"**{rec.get('contact', '')}** — {rec.get('contactTitle', '')}"  # noqa: E501
+                )
+                c1, c2 = st.columns(2)
+                c1.markdown(f"**Email:** {rec.get('email', '')}")
+                c2.markdown(f"**Phone:** {rec.get('phone', '')}")
+                st.caption(f"{rec.get('city', '')}, {rec.get('country', '')} · {rec.get('industry', '')}")
+            else:
+                st.success(f"Answer: {a.answer}")
             if _llm_used:
                 st.caption("🧠 AI-parsed intent")
         c1, c2, c3 = st.columns(3)

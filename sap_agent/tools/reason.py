@@ -25,6 +25,22 @@ KNOWN_COLUMNS: tuple[str, ...] = (
     "quantity",
     "qty",
     "name",
+    "contact",
+    "email",
+    "phone",
+    "industry",
+    "city",
+    "country",
+)
+
+#: contact lookup triggers — "who is contact at Acme Corp?"
+CONTACT_LOOKUP_RE = re.compile(
+    r"(?:contact|email|phone).*?(?:at|for|of)\s+([A-Za-z0-9][\w\s\.\-]*?)\s*[?.!]?$",
+    re.IGNORECASE,
+)
+WHO_CONTACT_RE = re.compile(
+    r"who.*?(?:contact|email|phone).*?(?:at|for|of)\s+([A-Za-z0-9][\w\s\.\-]*?)\s*[?.!]?$",
+    re.IGNORECASE,
 )
 
 #: value words that imply the status column (order statuses on the PoC)
@@ -110,10 +126,44 @@ def parse_question_with_llm(
     return base
 
 
+def _parse_contact_lookup(question: str) -> IntentConfig | None:
+    lowered = question.lower()
+    if "contact" not in lowered and "email" not in lowered and "phone" not in lowered:
+        return None
+    # try WHO pattern first, then generic contact pattern
+    for pat in (WHO_CONTACT_RE, CONTACT_LOOKUP_RE):
+        m = pat.search(question.strip())
+        if m:
+            raw_value = m.group(1).strip().strip("?.!")
+            # strip leading determiners
+            raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+            if not raw_value:
+                continue
+            # normalize: if value looks like customer, treat as lookup for that customer
+            column = "contact"
+            if "email" in lowered:
+                column = "email"
+            elif "phone" in lowered:
+                column = "phone"
+            return IntentConfig(
+                intent=QuestionIntent.LOOKUP,
+                column=column,
+                value=raw_value,
+                comparer="exact",
+            )
+    return None
+
+
 def parse_question(question: str) -> IntentConfig:
     lowered = question.lower().strip()
     if not lowered:
         return IntentConfig(intent=QuestionIntent.UNSUPPORTED, follow_up="empty question")
+
+    # customer contact lookup — must run before COUNT patterns so "who is contact at Acme Corp"
+    # doesn't fall through to unsupported
+    contact_cfg = _parse_contact_lookup(question)
+    if contact_cfg is not None:
+        return contact_cfg
 
     for pattern in EXISTENCE_PATTERNS:
         if pattern.search(lowered):

@@ -56,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     askq.add_argument(
         "--route",
         default=None,
-        help="top-level page to answer against: dashboard | catalog | orders (default: current page)",
+        help="top-level page to answer against: dashboard | customers | catalog | orders | customer (default: current page)",  # noqa: E501
     )
     sub.add_parser("report", help="attempt login; on failure draft a bug report")
     qa = sub.add_parser("qa", help="run the full QA audit across every page (screenshot, a11y, UX)")
@@ -253,7 +253,9 @@ def cmd_ask(config: Config, question: str, route: str | None = None) -> int:
                 source={
                     "catalog": "productTable",
                     "orders": "ordersTable",
-                }.get(route, "salesTable"),
+                    "customers": "customersTable",
+                    "customer": "customerOrdersTable",
+                }.get(route or "", "salesTable"),
             )
             payload = {
                 "question": answered.question,

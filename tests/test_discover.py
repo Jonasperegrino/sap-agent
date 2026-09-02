@@ -151,10 +151,10 @@ class TestEntityExtraction:
 
 
 class TestDiscoverAppUnit:
-    # the discovery walk visits dashboard/catalog/orders + one customer detail;
+    # the discovery walk visits dashboard/customers/catalog/orders + one customer detail;
     # the fake page serves the same table on every area, so each visit collects
     # the mock tables again
-    AREAS = 4
+    AREAS = 5
 
     def test_summary_shape(self) -> None:
         page = FakePage(table_locator=FakeTableList())
@@ -172,7 +172,7 @@ class TestDiscoverAppUnit:
         assert summary.tables[0].endpoint == "http://localhost:8080/data/sales.json"
         assert [e.name for e in summary.entities] == ["sales"]
         assert summary.services == ["http://localhost:8080/data/sales.json"]
-        assert summary.areas == ["dashboard", "catalog", "orders", "customer"]
+        assert summary.areas == ["dashboard", "customers", "catalog", "orders", "customer"]
 
     def test_multiple_tables_all_discovered_and_ranked(self) -> None:
         page = FakePage(table_locator=FakeTableList(count=2))

@@ -225,6 +225,151 @@ def _aggregate_top(
     )
 
 
+def _lookup_customer(
+    question: str,
+    intent: IntentConfig,
+    ctx: SessionContext,
+    page: Page,
+    app_url: str,
+    capture,
+) -> AnsweredQuestion | None:
+    """Lookup contact/email/phone for a customer — handles 'who is contact at Acme Corp?'."""
+    lookup_field = (intent.column or "contact").lower()
+    if lookup_field not in ("contact", "email", "phone", "industry", "city", "country", "name", "customer"):
+        lookup_field = "contact"
+    value = (intent.value or "").strip()
+    if not value:
+        return None
+
+    # ensure on customers page so network capture has customers.json
+    if current_route(page) != "#/customers":
+        try:
+            navigate(page, "customers", app_url)
+            ctx.record("nav", "navigate.customers", outcome="landed", url=page.url)
+        except Exception:
+            pass
+
+    # try network first — precise JSON
+    customers: list[dict] | None = None
+    if capture is not None:
+        try:
+            body = capture.latest_response_body("customers.json")
+            if isinstance(body, list) and body and isinstance(body[0], dict):
+                customers = body
+        except Exception:
+            customers = None
+        if customers is None:
+            for url in capture.capture_response_urls():
+                if "customers.json" in url:
+                    try:
+                        b = capture.response_body(url)
+                        if isinstance(b, list) and b and isinstance(b[0], dict):
+                            customers = b
+                            break
+                    except Exception:
+                        continue
+
+    if customers is not None:
+        matched = [c for c in customers if _matches(str(c.get("name", "")), value, "exact")]
+        if not matched:
+            # fallback contains
+            lowered = value.lower()
+            matched = [c for c in customers if lowered in str(c.get("name", "")).lower()]
+        if not matched:
+            return _freeze(
+                AnsweredQuestion(
+                    question=question,
+                    intent=QuestionIntent.LOOKUP,
+                    not_found=True,
+                    message=f"no customer with name {value!r}",
+                    evidence=AnswerEvidence(
+                        source="customers.json", column=lookup_field, matched_rows=0, endpoint="customers.json"
+                    ),  # noqa: E501
+                    confidence="high",
+                ),
+                ctx,
+            )
+        rec = matched[0]
+        answer_payload = [
+            {
+                "customer": rec.get("name"),
+                "contact": rec.get("contact"),
+                "contactTitle": rec.get("contactTitle"),
+                "email": rec.get("email"),
+                "phone": rec.get("phone"),
+                "city": rec.get("city"),
+                "country": rec.get("country"),
+                "industry": rec.get("industry"),
+            }
+        ]
+        ctx.record("answer", "lookup", outcome=f"found {rec.get('name')} contact={rec.get('contact')}")
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.LOOKUP,
+                answer=answer_payload,
+                evidence=AnswerEvidence(
+                    source="customers.json", column=lookup_field, matched_rows=len(matched), endpoint="customers.json"
+                ),  # noqa: E501
+                confidence="high",
+            ),
+            ctx,
+        )
+
+    # fallback — table snapshot
+    snapshot = _snapshot(page, ctx)
+    # customersTable columns: Customer, Industry, Contact, Location, Email, Phone
+    col_idx = {name.lower(): idx for idx, name in enumerate(snapshot.data.columns)}
+    cust_idx = col_idx.get("customer")
+    contact_idx = col_idx.get("contact")
+    if cust_idx is None:
+        return None
+    matched_rows = [r for r in snapshot.data.rows if cust_idx < len(r) and _matches(r[cust_idx], value, "exact")]
+    if not matched_rows:
+        lowered = value.lower()
+        matched_rows = [r for r in snapshot.data.rows if cust_idx < len(r) and lowered in r[cust_idx].lower()]
+    if not matched_rows:
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.LOOKUP,
+                not_found=True,
+                message=f"no customer with name {value!r}",
+                evidence=AnswerEvidence(
+                    source="customersTable", column=lookup_field, matched_rows=0, endpoint="customersTable"
+                ),  # noqa: E501
+                confidence="high",
+            ),
+            ctx,
+        )
+    # return first match contact
+    row = matched_rows[0]
+    contact_val = row[contact_idx].strip() if contact_idx is not None and contact_idx < len(row) else ""
+    email_idx = col_idx.get("email")
+    phone_idx = col_idx.get("phone")
+    answer_payload = [
+        {
+            "customer": row[cust_idx].strip() if cust_idx < len(row) else value,
+            "contact": contact_val,
+            "email": row[email_idx].strip() if email_idx is not None and email_idx < len(row) else "",
+            "phone": row[phone_idx].strip() if phone_idx is not None and phone_idx < len(row) else "",
+        }
+    ]
+    ctx.record("answer", "lookup", outcome=f"found {value} contact={contact_val} via table")
+    return _freeze(
+        AnsweredQuestion(
+            question=question,
+            intent=QuestionIntent.LOOKUP,
+            answer=answer_payload,
+            evidence=AnswerEvidence(
+                source="customersTable", column=lookup_field, matched_rows=len(matched_rows), endpoint="customersTable"
+            ),  # noqa: E501
+            confidence="high",
+        ),
+        ctx,
+    )
+
+
 def evaluate_question(
     page: Page,
     question: str,
@@ -259,6 +404,23 @@ def evaluate_question(
                 unsupported=True,
                 message=intent.follow_up or "unsupported question type",
                 follow_up=intent.follow_up,
+            ),
+            ctx,
+        )
+
+    # LOOKUP — customer contact queries need customers page, handle before generic route nav
+    if intent.intent == QuestionIntent.LOOKUP:
+        result = _lookup_customer(question, intent, ctx, page, app_url, capture)
+        if result is not None:
+            return result
+        # if lookup helper couldn't resolve (e.g. unknown column), fall through to generic unsupported
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.LOOKUP,
+                unsupported=True,
+                message=intent.follow_up or "unsupported lookup",
+                follow_up="try: who is contact at Acme Corp?",
             ),
             ctx,
         )

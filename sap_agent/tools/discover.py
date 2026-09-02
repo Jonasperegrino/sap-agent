@@ -84,7 +84,7 @@ class DiscoverResult:
 
 
 #: top-level routes the discovery walk visits (menu-driven)
-_WALK_ROUTES: tuple[str, ...] = ("dashboard", "catalog", "orders")
+_WALK_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
 
 
 def _walk_tables(page: Page, app_url: str) -> tuple[list[object], list[str]]:

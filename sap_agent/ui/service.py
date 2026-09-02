@@ -58,7 +58,12 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
                     route=route,
                     app_url=config.app_url,
                     capture=capture,
-                    source={"catalog": "productTable", "orders": "ordersTable"}.get(route, "salesTable"),
+                    source={
+                        "catalog": "productTable",
+                        "orders": "ordersTable",
+                        "customers": "customersTable",
+                        "customer": "customerOrdersTable",
+                    }.get(route or "", "salesTable"),
                 )
                 return RunResult(answer=answer, trace=ctx.snapshot())
             except AuthError as exc:
