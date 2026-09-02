@@ -1,0 +1,212 @@
+{
+  "app_url": "http://localhost:8080",
+  "username": "demo",
+  "scenarios": [
+    {
+      "id": "login-good",
+      "kind": "login",
+      "expect": {
+        "exit": 0
+      }
+    },
+    {
+      "id": "discover-summary",
+      "kind": "discover",
+      "expect": {
+        "exit": 0,
+        "has_entity": "sales",
+        "columns_superset": [
+          "Customer",
+          "Amount",
+          "Status",
+          "Built"
+        ]
+      }
+    },
+    {
+      "id": "discover-multiarea",
+      "kind": "discover",
+      "expect": {
+        "exit": 0,
+        "has_entities": [
+          "sales",
+          "products",
+          "customers"
+        ],
+        "tables_min": 4
+      }
+    },
+    {
+      "id": "ask-status-approved",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are Approved"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 4
+      }
+    },
+    {
+      "id": "ask-built-2026",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders were built in 2026"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 10
+      }
+    },
+    {
+      "id": "ask-not-found",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are Returned"
+      },
+      "expect": {
+        "exit": 0,
+        "not_found": true
+      }
+    },
+    {
+      "id": "ask-unsupported",
+      "kind": "ask",
+      "args": {
+        "question": "which customer spent the most"
+      },
+      "expect": {
+        "exit": 0,
+        "unsupported": true
+      }
+    },
+    {
+      "id": "ask-products-total",
+      "kind": "ask",
+      "args": {
+        "question": "how many products are there",
+        "route": "catalog"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 15
+      }
+    },
+    {
+      "id": "ask-products-category",
+      "kind": "ask",
+      "args": {
+        "question": "how many products with category Machinery",
+        "route": "catalog"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 4
+      }
+    },
+    {
+      "id": "ask-orders-2026-history",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are there",
+        "route": "orders"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 10
+      }
+    },
+    {
+      "id": "ask-customer-orders",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders for Acme Corp"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 2
+      }
+    },
+    {
+      "id": "inspect-dashboard",
+      "kind": "inspect",
+      "expect": {
+        "exit": 0
+      }
+    },
+    {
+      "id": "report-bad-creds",
+      "kind": "report",
+      "password_override": "wrong-password-for-eval",
+      "expect": {
+        "exit": 1,
+        "sections": [
+          "## Expected",
+          "## Actual",
+          "## Reproduction steps",
+          "## Environment",
+          "## Attachments"
+        ]
+      }
+    },
+    {
+      "id": "login-bad-password",
+      "kind": "login",
+      "password_override": "definitely-wrong-for-eval",
+      "expect": {
+        "exit": 1
+      }
+    },
+    {
+      "id": "ask-status-cancelled",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are Cancelled"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 1
+      }
+    },
+    {
+      "id": "ask-status-rejected",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are Rejected"
+      },
+      "expect": {
+        "exit": 0,
+        "answer": 1
+      }
+    },
+    {
+      "id": "ask-existence-customer-notfound",
+      "kind": "ask",
+      "args": {
+        "question": "how many orders are from Nonexistent Corp"
+      },
+      "expect": {
+        "exit": 0,
+        "not_found": true
+      }
+    },
+    {
+      "id": "qa-full-audit",
+      "kind": "qa",
+      "expect": {
+        "routes": ["dashboard", "catalog", "orders", "customer"],
+        "pages_min": 4,
+        "md_sections": ["# QA Report", "## dashboard"]
+      }
+    },
+    {
+      "id": "qa-issue-scoring",
+      "kind": "qa",
+      "expect": {
+        "a11y_issues_min": 5,
+        "ux_issues_min": 8,
+        "severities_present": ["medium", "low"]
+      }
+    }
+  ]
+}

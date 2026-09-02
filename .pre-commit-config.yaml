@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+        exclude: sap_agent/ui/assets/worldmap\.png
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ty strict — 133 diags currently, keep manual until cleaned. Run: uv run ty check
+  # uncomment to enforce in pre-commit:
+  # - repo: local
+  #   hooks:
+  #     - id: ty-check
+  #       name: ty check
+  #       entry: uv run ty check
+  #       language: system
+  #       types: [python]
+  #       pass_filenames: false
+  - repo: local
+    hooks:
+      - id: ty-check-manual
+        name: ty check (manual)
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]

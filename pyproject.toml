@@ -1,0 +1,40 @@
+[project]
+name = "sap-agent"
+version = "0.1.0"
+description = "SAP Fiori autonomous discovery and Q&A agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.48",
+    "pydantic>=2.9",
+    "streamlit>=1.62.0",
+]
+
+[project.scripts]
+fiori-agent = "sap_agent.cli:main"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+    "pytest>=8.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.8",
+    "ty>=0.0.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: requires running PoC app and installed Chromium",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.coverage.run]
+omit = ["sap_agent/ui/*"]
