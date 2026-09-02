@@ -10,6 +10,8 @@ from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, IntentConfig, QuestionIntent
 from sap_agent.tools.answer import (
     _checksum,
+    _infer_auto_route,
+    _lookup_customer,
     _matches,
     _normalize,
     _parse_amount,
@@ -405,3 +407,113 @@ class TestAggregateAvg:
         # empty network_rows falls back to table snapshot which has 3 rows
         assert result.intent == QuestionIntent.AGGREGATE
         assert isinstance(result.answer, list)
+
+
+class TestInferAutoRoute:
+    def test_aggregate_returns_none(self) -> None:
+        # AGGREGATE intents must not auto-route away from dashboard (network JSON handles joins)
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="sum",
+            group_by="industry",
+        )
+        assert _infer_auto_route(intent) is None
+
+    def test_aggregate_by_customer_returns_none(self) -> None:
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="count",
+            group_by="customer",
+        )
+        assert _infer_auto_route(intent) is None
+
+    def test_aggregate_avg_returns_none(self) -> None:
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="avg",
+            aggregation_column="price",
+            group_by="category",
+        )
+        assert _infer_auto_route(intent) is None
+
+    def test_count_where_still_routes_customers(self) -> None:
+        intent = IntentConfig(
+            intent=QuestionIntent.COUNT_WHERE,
+            column="country",
+            value="Germany",
+        )
+        assert _infer_auto_route(intent) == "customers"
+
+
+class TestLookupCustomerCreditRating:
+    def test_lookup_customer_returns_credit_rating_and_since(self) -> None:
+        from fakes import FakeCapture
+
+        ctx = _ctx()
+        intent = IntentConfig(
+            intent=QuestionIntent.LOOKUP,
+            column="creditRating",
+            value="Acme Corp",
+            comparer="exact",
+        )
+        customers_json = [
+            {
+                "id": "C-1001",
+                "name": "Acme Corp",
+                "city": "Berlin",
+                "country": "Germany",
+                "contact": "Jane Doe",
+                "contactTitle": "Head of Procurement",
+                "phone": "+49 30 901820",
+                "email": "jane.doe@acme-corp.example",
+                "industry": "Manufacturing",
+                "since": "2019-03-12",
+                "creditRating": "A",
+            }
+        ]
+        capture = FakeCapture(["http://x/customers.json"], bodies={"customers.json": customers_json})
+        page = FakePage(url="http://localhost:8080/#/customers")
+        result = _lookup_customer(
+            "what is the credit rating of Acme Corp?",
+            intent,
+            ctx,
+            page,
+            "http://localhost:8080",
+            capture,
+        )
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.answer is not None
+        assert len(result.answer) == 1
+        assert result.answer[0]["creditRating"] == "A"
+        assert result.answer[0]["since"] == "2019-03-12"
+
+    def test_lookup_customer_returns_since(self) -> None:
+        from fakes import FakeCapture
+
+        ctx = _ctx()
+        intent = IntentConfig(
+            intent=QuestionIntent.LOOKUP,
+            column="since",
+            value="GlobalTech",
+            comparer="exact",
+        )
+        customers_json = [
+            {
+                "id": "C-1002",
+                "name": "GlobalTech",
+                "since": "2020-07-01",
+                "creditRating": "B",
+                "contact": "Tom Müller",
+                "phone": "+49 89 63648000",
+                "email": "tom.mueller@globaltech.example",
+                "industry": "Information Technology",
+                "city": "Munich",
+                "country": "Germany",
+            }
+        ]
+        capture = FakeCapture(["http://x/customers.json"], bodies={"customers.json": customers_json})
+        page = FakePage(url="http://localhost:8080/#/customers")
+        result = _lookup_customer("when did GlobalTech start?", intent, ctx, page, "http://localhost:8080", capture)
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.answer is not None
+        assert result.answer[0]["since"] == "2020-07-01"

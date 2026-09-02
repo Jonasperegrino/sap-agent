@@ -204,7 +204,7 @@ def parse_question_with_llm(
 
 def _parse_contact_lookup(question: str) -> IntentConfig | None:
     lowered = question.lower()
-    if not any(k in lowered for k in ("contact", "email", "phone", "city", "country", "industry")):
+    if not any(k in lowered for k in ("contact", "email", "phone", "city", "country", "industry", "credit", "since")):
         return None
     # don't hijack count/aggregate questions
     if any(p.search(lowered) for p in COUNT_TOTAL_PATTERNS):
@@ -237,6 +237,10 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
                 column = "country"
             elif "industry" in lowered:
                 column = "industry"
+            elif "credit" in lowered:
+                column = "creditRating"
+            elif "since" in lowered:
+                column = "since"
             else:
                 column = "contact"
             return IntentConfig(
@@ -265,6 +269,10 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
                 column = "country"
             elif "industry" in lowered:
                 column = "industry"
+            elif "credit" in lowered:
+                column = "creditRating"
+            elif "since" in lowered:
+                column = "since"
             else:
                 column = "contact"
             return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw, comparer="exact")
@@ -284,6 +292,10 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
                 column = "country"
             elif "industry" in lowered:
                 column = "industry"
+            elif "credit" in lowered:
+                column = "creditRating"
+            elif "since" in lowered:
+                column = "since"
             else:
                 column = "contact"
             return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw_value, comparer="exact")
@@ -431,6 +443,19 @@ def _parse_avg(question: str) -> IntentConfig | None:
 
 def _parse_aggregate_count_by(question: str) -> IntentConfig | None:
     lowered = question.lower()
+    # "how many customers by <group>" should route to customers page, not aggregate sales rows
+    if "customers" in lowered:
+        for grp in AGGREGATE_GROUPS:
+            if f"by {grp}" in lowered:
+                match = COUNT_WHERE_VALUE.search(question.strip())
+                value = match.group(1).strip() if match else grp
+                return IntentConfig(
+                    intent=QuestionIntent.COUNT_WHERE,
+                    column=grp,
+                    value=value,
+                    comparer="exact",
+                )
+        return None
     if not any(p.search(lowered) for p in COUNT_TOTAL_PATTERNS):
         return None
     for grp in AGGREGATE_GROUPS:

@@ -129,10 +129,10 @@ class TestAggregateExtended:
         assert result.group_by == "category"
 
     def test_how_many_customers_by_country(self) -> None:
+        # "how many customers by <group>" falls through to COUNT_TOTAL (routes to customers page)
         result = parse_question("how many customers by country")
-        assert result.intent == QuestionIntent.AGGREGATE
-        assert result.aggregation == "count"
-        assert result.group_by == "country"
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "country"
 
     def test_count_where_preserved(self) -> None:
         result = parse_question("how many orders are Approved")

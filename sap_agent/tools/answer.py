@@ -32,15 +32,14 @@ _CATALOG_COLS = {"category", "price", "stock", "unit"}
 
 
 def _infer_auto_route(intent: IntentConfig) -> str | None:
+    if intent.intent == QuestionIntent.AGGREGATE:
+        return None
     col = (intent.column or "").lower()
     grp = (intent.group_by or "").lower()
-    # direct column mapping
     if col in _CUSTOMERS_COLS or grp in _CUSTOMERS_COLS:
         return "customers"
     if col in _CATALOG_COLS or grp in _CATALOG_COLS:
         return "catalog"
-    # name is ambiguous — check value looks like product vs customer
-    # keep dashboard for sales-related (customer, amount, status, built)
     return None
 
 
@@ -401,7 +400,18 @@ def _lookup_customer(
 ) -> AnsweredQuestion | None:
     """Lookup contact/email/phone for a customer — handles 'who is contact at Acme Corp?'."""
     lookup_field = (intent.column or "contact").lower()
-    if lookup_field not in ("contact", "email", "phone", "industry", "city", "country", "name", "customer"):
+    if lookup_field not in (
+        "contact",
+        "email",
+        "phone",
+        "industry",
+        "city",
+        "country",
+        "name",
+        "customer",
+        "creditrating",
+        "since",
+    ):
         lookup_field = "contact"
     value = (intent.value or "").strip()
     if not value:
@@ -466,6 +476,8 @@ def _lookup_customer(
                 "city": rec.get("city"),
                 "country": rec.get("country"),
                 "industry": rec.get("industry"),
+                "creditRating": rec.get("creditRating"),
+                "since": rec.get("since"),
             }
         ]
         ctx.record("answer", "lookup", outcome=f"found {rec.get('name')} contact={rec.get('contact')}")
@@ -767,10 +779,15 @@ def evaluate_question(
     if intent.intent == QuestionIntent.AGGREGATE:
         network_rows = None
         if capture is not None:
+            # pick JSON source by columns needed: product columns -> products.json
+            agg_col = (intent.aggregation_column or "").lower()
+            group_by = (intent.group_by or "").lower()
+            product_cols = {"price", "stock", "category", "name", "unit"}
+            json_key = "products.json" if agg_col in product_cols or group_by in product_cols else "sales.json"
             try:
-                body = capture.latest_response_body("sales.json")
+                body = capture.latest_response_body(json_key)
                 if body is None:
-                    body = capture.latest_response_body("sales")
+                    body = capture.latest_response_body(json_key[: json_key.rfind(".")])
                 if isinstance(body, list) and body and isinstance(body[0], dict):
                     network_rows = body
             except Exception:
