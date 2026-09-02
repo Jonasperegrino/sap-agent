@@ -201,33 +201,47 @@ def _aggregate_top(
                         except Exception:
                             continue
         # group
+        is_avg = intent.aggregation == "avg"
         totals: dict[str, float] = {}
-        for rec in filtered:
-            if group_key in ("industry", "city", "country") and join_by_name:
-                # rec has customer name under 'customer' or group_key?
-                cust_name = str(rec.get("customer", rec.get("Customer", ""))).lower()
-                # snapshot fallback uses rec with Customer key? handle both
-                if not cust_name:
-                    cust_name = str(rec.get(group_key, "")).lower()
-                g = join_by_name.get(cust_name, "").strip()
+        avg_sums: dict[str, float] = {}
+        avg_counts: dict[str, int] = {}
+        if is_avg and intent.group_by is None:
+            vals = [float(rec.get(agg_col, 0) or 0) for rec in filtered]
+            avg = round(sum(vals) / len(vals), 2) if vals else 0.0
+            answer = [{"average": avg}]
+        else:
+            for rec in filtered:
+                if group_key in ("industry", "city", "country") and join_by_name:
+                    cust_name = str(rec.get("customer", rec.get("Customer", ""))).lower()
+                    if not cust_name:
+                        cust_name = str(rec.get(group_key, "")).lower()
+                    g = join_by_name.get(cust_name, "").strip()
+                    if not g:
+                        continue
+                else:
+                    g = str(rec.get(group_key, "")).strip()
                 if not g:
                     continue
+                if is_count:
+                    totals[g] = totals.get(g, 0.0) + 1
+                elif is_avg:
+                    avg_sums[g] = avg_sums.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
+                    avg_counts[g] = avg_counts.get(g, 0) + 1
+                else:
+                    totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
+            if is_avg:
+                key_name = "customer" if group_key == "customer" else group_key
+                avg_by_key = {k: round(avg_sums[k] / avg_counts[k], 2) for k in avg_sums}
+                ranked = sorted(avg_by_key.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                answer = [{key_name: k, "average": v} for k, v in ranked]
             else:
-                g = str(rec.get(group_key, "")).strip()
-            if not g:
-                continue
-            if is_count:
-                totals[g] = totals.get(g, 0.0) + 1
-            else:
-                totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
-        ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
-        if is_count:
-            # for industry/country groups, key is industry name, not customer
-            key_name = "customer" if group_key == "customer" else group_key
-            answer = [{key_name: k, "count": int(v)} for k, v in ranked]
-        else:
-            key_name = "customer" if group_key == "customer" else group_key
-            answer = [{key_name: k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
+                ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                if is_count:
+                    key_name = "customer" if group_key == "customer" else group_key
+                    answer = [{key_name: k, "count": int(v)} for k, v in ranked]
+                else:
+                    key_name = "customer" if group_key == "customer" else group_key
+                    answer = [{key_name: k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
         if not answer:
             return AnsweredQuestion(
                 question=question,
@@ -316,31 +330,47 @@ def _aggregate_top(
                             break
                     except Exception:
                         continue
+    is_avg = intent.aggregation == "avg"
     totals: dict[str, float] = {}
-    for rec in filtered:
-        if group_key in ("industry", "city", "country") and (join_by_id or join_by_name):
-            # sales row has customerId, fallback to customer name
-            cid = str(rec.get("customerId", "")).strip()
-            cname = str(rec.get("customer", "")).lower().strip()
-            g = join_by_id.get(cid, "") or join_by_name.get(cname, "")
-            g = g.strip()
+    avg_sums: dict[str, float] = {}
+    avg_counts: dict[str, int] = {}
+    if is_avg and intent.group_by is None:
+        vals = [float(rec.get(agg_col, rec.get("amount", 0)) or 0) for rec in filtered]
+        avg = round(sum(vals) / len(vals), 2) if vals else 0.0
+        answer = [{"average": avg}]
+    else:
+        for rec in filtered:
+            if group_key in ("industry", "city", "country") and (join_by_id or join_by_name):
+                cid = str(rec.get("customerId", "")).strip()
+                cname = str(rec.get("customer", "")).lower().strip()
+                g = join_by_id.get(cid, "") or join_by_name.get(cname, "")
+                g = g.strip()
+                if not g:
+                    continue
+            else:
+                g = str(rec.get(group_key, "")).strip()
             if not g:
                 continue
+            if is_count:
+                totals[g] = totals.get(g, 0.0) + 1
+            elif is_avg:
+                avg_sums[g] = avg_sums.get(g, 0.0) + float(rec.get(agg_col, rec.get("amount", 0)))
+                avg_counts[g] = avg_counts.get(g, 0) + 1
+            else:
+                val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
+                totals[g] = totals.get(g, 0.0) + val
+        if is_avg:
+            key_name = "customer" if group_key == "customer" else group_key
+            avg_by_key = {k: round(avg_sums[k] / avg_counts[k], 2) for k in avg_sums}
+            ranked = sorted(avg_by_key.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+            answer = [{key_name: k, "average": v} for k, v in ranked]
         else:
-            g = str(rec.get(group_key, "")).strip()
-        if not g:
-            continue
-        if is_count:
-            totals[g] = totals.get(g, 0.0) + 1
-        else:
-            val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
-            totals[g] = totals.get(g, 0.0) + val
-    ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
-    key_name = "customer" if group_key == "customer" else group_key
-    if is_count:
-        answer = [{key_name: k, "count": int(v)} for k, v in ranked]
-    else:
-        answer = [{key_name: k, "revenue": round(v, 2)} for k, v in ranked]
+            ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+            key_name = "customer" if group_key == "customer" else group_key
+            if is_count:
+                answer = [{key_name: k, "count": int(v)} for k, v in ranked]
+            else:
+                answer = [{key_name: k, "revenue": round(v, 2)} for k, v in ranked]
     if not answer:
         return AnsweredQuestion(
             question=question,

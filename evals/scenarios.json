@@ -207,6 +207,48 @@
         "ux_issues_min": 8,
         "severities_present": ["medium", "low"]
       }
+    },
+    {
+      "id": "ask-revenue-by-status",
+      "kind": "ask",
+      "args": {"question": "revenue by status"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-orders-by-status",
+      "kind": "ask",
+      "args": {"question": "orders by status"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-products-by-category",
+      "kind": "ask",
+      "args": {"question": "how many products by category", "route": "catalog"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-customers-by-country",
+      "kind": "ask",
+      "args": {"question": "how many customers by country"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-average-order-value",
+      "kind": "ask",
+      "args": {"question": "average order value"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-average-amount-by-customer",
+      "kind": "ask",
+      "args": {"question": "average amount by customer"},
+      "expect": {"exit": 0}
+    },
+    {
+      "id": "ask-average-price-by-category",
+      "kind": "ask",
+      "args": {"question": "average price by category", "route": "catalog"},
+      "expect": {"exit": 0}
     }
   ]
 }

@@ -295,8 +295,8 @@ def _parse_amount_orders(question: str) -> IntentConfig | None:
     has_amount = "amount" in lowered or "revenue" in lowered
     has_orders = "orders" in lowered or "order" in lowered
 
-    # orders by customer/industry/country/city — count per group
-    for grp in ("customer", "industry", "country", "city"):
+    # orders by customer/industry/country/city/status — count per group
+    for grp in ("customer", "industry", "country", "city", "status"):
         if has_orders and (f"by {grp}" in lowered or f"per {grp}" in lowered):
             return IntentConfig(
                 intent=QuestionIntent.AGGREGATE,
@@ -304,8 +304,8 @@ def _parse_amount_orders(question: str) -> IntentConfig | None:
                 group_by=grp,
                 limit=10,
             )
-    # amount/revenue by customer/industry/country — sum per group
-    for grp in ("customer", "industry", "country", "city"):
+    # amount/revenue by customer/industry/country/status — sum per group
+    for grp in ("customer", "industry", "country", "city", "status"):
         if has_amount and (f"by {grp}" in lowered or f"per {grp}" in lowered):
             return IntentConfig(
                 intent=QuestionIntent.AGGREGATE,
@@ -403,6 +403,47 @@ def _parse_amount_orders(question: str) -> IntentConfig | None:
     return None
 
 
+AGGREGATE_GROUPS = ("customer", "industry", "country", "city", "status", "category")
+
+
+def _parse_avg(question: str) -> IntentConfig | None:
+    lowered = question.lower()
+    if "average" not in lowered and "avg" not in lowered:
+        return None
+    if "price" in lowered:
+        agg_col = "price"
+    elif "stock" in lowered:
+        agg_col = "stock"
+    else:
+        agg_col = "amount"
+    group_by: str | None = None
+    for grp in AGGREGATE_GROUPS:
+        if f"by {grp}" in lowered:
+            group_by = grp
+            break
+    return IntentConfig(
+        intent=QuestionIntent.AGGREGATE,
+        aggregation="avg",
+        aggregation_column=agg_col,
+        group_by=group_by,
+    )
+
+
+def _parse_aggregate_count_by(question: str) -> IntentConfig | None:
+    lowered = question.lower()
+    if not any(p.search(lowered) for p in COUNT_TOTAL_PATTERNS):
+        return None
+    for grp in AGGREGATE_GROUPS:
+        if f"by {grp}" in lowered:
+            return IntentConfig(
+                intent=QuestionIntent.AGGREGATE,
+                aggregation="count",
+                group_by=grp,
+                limit=10,
+            )
+    return None
+
+
 def _parse_product_lookup(question: str) -> IntentConfig | None:
     lowered = question.lower()
     has_price = "price" in lowered
@@ -447,6 +488,17 @@ def parse_question(question: str) -> IntentConfig:
     contact_cfg = _parse_contact_lookup(question)
     if contact_cfg is not None:
         return contact_cfg
+
+    # average / avg aggregate — must run before _parse_amount_orders so "average amount by X"
+    # returns avg instead of sum
+    avg_cfg = _parse_avg(question)
+    if avg_cfg is not None:
+        return avg_cfg
+
+    # "how many <noun> by <group>" → AGGREGATE count, before COUNT_TOTAL_PATTERNS hijacks
+    agg_count_cfg = _parse_aggregate_count_by(question)
+    if agg_count_cfg is not None:
+        return agg_count_cfg
 
     # amount/orders by customer — deterministic aggregate without LLM
     amount_cfg = _parse_amount_orders(question)

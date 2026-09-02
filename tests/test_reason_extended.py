@@ -85,3 +85,67 @@ class TestParseQuestionExtendedBranches:
         # value == "there" → COUNT_TOTAL — line 141-142
         result = parse_question("how many orders are there?")
         assert result.intent == QuestionIntent.COUNT_TOTAL
+
+
+class TestAggregateExtended:
+    def test_revenue_by_status(self) -> None:
+        result = parse_question("revenue by status")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "sum"
+        assert result.group_by == "status"
+        assert result.aggregation_column == "amount"
+
+    def test_orders_by_status(self) -> None:
+        result = parse_question("orders by status")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "count"
+        assert result.group_by == "status"
+
+    def test_average_order_value(self) -> None:
+        result = parse_question("average order value")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "avg"
+        assert result.aggregation_column == "amount"
+        assert result.group_by is None
+
+    def test_average_amount_by_customer(self) -> None:
+        result = parse_question("average amount by customer")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "avg"
+        assert result.aggregation_column == "amount"
+        assert result.group_by == "customer"
+
+    def test_average_price_by_category(self) -> None:
+        result = parse_question("average price by category")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "avg"
+        assert result.aggregation_column == "price"
+        assert result.group_by == "category"
+
+    def test_how_many_products_by_category(self) -> None:
+        result = parse_question("how many products by category")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "count"
+        assert result.group_by == "category"
+
+    def test_how_many_customers_by_country(self) -> None:
+        result = parse_question("how many customers by country")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "count"
+        assert result.group_by == "country"
+
+    def test_count_where_preserved(self) -> None:
+        result = parse_question("how many orders are Approved")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "status"
+
+    def test_orders_by_customer_preserved(self) -> None:
+        result = parse_question("how many orders by customer")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "count"
+        assert result.group_by == "customer"
+
+    def test_count_where_by_category_preserved(self) -> None:
+        result = parse_question("how many products with category Machinery")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "category"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from fakes import FakeLocator
+from fakes import FakeCapture, FakeLocator
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, IntentConfig, QuestionIntent
@@ -336,3 +336,72 @@ class TestEvaluateQuestionBranches:
         intent = IntentConfig(intent=QuestionIntent.COUNT_WHERE)
         result = evaluate_question(FakePage(), "count", ctx, intent=intent)
         assert result.unsupported is True
+
+
+class TestAggregateAvg:
+    def test_aggregate_avg_no_group(self) -> None:
+        ctx = _ctx()
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="avg",
+            aggregation_column="amount",
+        )
+        capture = FakeCapture(
+            ["http://x/sales.json"],
+            bodies={
+                "sales.json": [
+                    {"customer": "Acme Corp", "amountEur": 1000},
+                    {"customer": "GlobalTech", "amountEur": 2000},
+                ]
+            },
+        )
+        result = evaluate_question(FakePage(), "average order value", ctx, intent=intent, capture=capture)
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert isinstance(result.answer, list)
+        assert len(result.answer) == 1
+        assert "average" in result.answer[0]
+        assert result.answer[0]["average"] == 1500.0
+
+    def test_aggregate_avg_by_group(self) -> None:
+        ctx = _ctx()
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="avg",
+            aggregation_column="amount",
+            group_by="customer",
+            limit=2,
+        )
+        capture = FakeCapture(
+            ["http://x/sales.json"],
+            bodies={
+                "sales.json": [
+                    {"customer": "Acme Corp", "amountEur": 1000},
+                    {"customer": "Acme Corp", "amountEur": 2000},
+                    {"customer": "GlobalTech", "amountEur": 3000},
+                ]
+            },
+        )
+        result = evaluate_question(FakePage(), "average amount by customer", ctx, intent=intent, capture=capture)
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert isinstance(result.answer, list)
+        assert len(result.answer) == 2
+        assert "average" in result.answer[0]
+        assert result.answer[0]["customer"] == "GlobalTech"
+        assert result.answer[0]["average"] == 3000.0
+        assert result.answer[1]["customer"] == "Acme Corp"
+        assert result.answer[1]["average"] == 1500.0
+
+    def test_aggregate_avg_with_network_rows_empty_after_filter(self) -> None:
+        ctx = _ctx()
+        intent = IntentConfig(
+            intent=QuestionIntent.AGGREGATE,
+            aggregation="avg",
+            aggregation_column="amount",
+            group_by="customer",
+        )
+        network_rows: list[dict] = []
+        capture = FakeCapture(["http://x/sales.json"], bodies={"sales.json": network_rows})
+        result = evaluate_question(FakePage(), "average revenue", ctx, intent=intent, capture=capture)
+        # empty network_rows falls back to table snapshot which has 3 rows
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert isinstance(result.answer, list)
