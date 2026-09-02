@@ -273,7 +273,7 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
     if m:
         raw_value = m.group(1).strip().strip("?.!")
         raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
-        if raw_value and (_looks_like_customer(raw_value) or len(raw_value.split()) <= 3):
+        if raw_value and _looks_like_customer(raw_value):
             if "email" in lowered:
                 column = "email"
             elif "phone" in lowered:
@@ -550,5 +550,49 @@ def parse_question(question: str) -> IntentConfig:
                 return IntentConfig(
                     intent=QuestionIntent.COUNT_WHERE, column="customer", value=raw or cust, comparer="exact"
                 )
+
+    # bare "customers from Germany" without how many — treat as count
+    if "customers" in lowered and any(sep in lowered for sep in (" from ", " in ", " with ", " of ", " for ", " by ")):
+        m = COUNT_WHERE_VALUE.search(question.strip())
+        if m:
+            raw = m.group(1).strip().strip("?.!")
+            raw = re.sub(r"^(?:our|the|my)\s+", "", raw, flags=re.IGNORECASE).strip()
+            for col in ("industry", "country", "city", "credit rating"):
+                if raw.lower().startswith(col):
+                    raw = raw[len(col) :].strip()
+                    break
+            inferred = _infer_customer_column(raw)
+            if inferred:
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=inferred, value=raw, comparer="exact")
+            if _looks_like_customer(raw):
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="customer", value=raw, comparer="exact")
+            if raw.lower() in {"a", "b", "c"} and "credit" in lowered:
+                return IntentConfig(
+                    intent=QuestionIntent.COUNT_WHERE, column="creditRating", value=raw.upper(), comparer="exact"
+                )  # noqa: E501
+            if raw.lower() in KNOWN_COUNTRIES:
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="country", value=raw, comparer="exact")
+            if raw.lower() in KNOWN_CITIES:
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="city", value=raw, comparer="exact")
+            if raw.lower() in KNOWN_INDUSTRIES:
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="industry", value=raw, comparer="exact")
+        for val in KNOWN_COUNTRIES + KNOWN_CITIES + KNOWN_INDUSTRIES:
+            if val in lowered:
+                col = _infer_customer_column(val) or (
+                    "country" if val in KNOWN_COUNTRIES else "city" if val in KNOWN_CITIES else "industry"
+                )  # noqa: E501
+                idx = lowered.find(val)
+                raw = question[idx : idx + len(val)].strip().strip("?.!")
+                return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=col, value=raw or val, comparer="exact")
+        # credit rating bare
+        if "credit" in lowered:
+            m2 = re.search(r"credit rating\s+([ABC])\b", lowered, re.IGNORECASE)
+            if m2:
+                return IntentConfig(
+                    intent=QuestionIntent.COUNT_WHERE,
+                    column="creditRating",
+                    value=m2.group(1).upper(),
+                    comparer="exact",
+                )  # noqa: E501
 
     return IntentConfig(intent=QuestionIntent.UNSUPPORTED, follow_up="unsupported question type")
