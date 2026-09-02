@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,29 +42,63 @@ def _launch_args() -> dict:
 def run_question(config: Config, question: str, route: str | None = None) -> RunResult:
     """Answer a question and automatically draft a report when the run fails."""
     ctx = SessionContext(config)
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=config.headless, **_launch_args())
-        page = browser.new_page()
-        capture = NetworkCapture(page, config.app_url)
-        try:
-            login(page, config, ctx)
-            answer = evaluate_question(
-                page,
-                question,
-                ctx,
-                endpoint=config.app_url,
-                route=route,
-                app_url=config.app_url,
-                capture=capture,
-                source={"catalog": "productTable", "orders": "ordersTable"}.get(route, "salesTable"),
-            )
-            return RunResult(answer=answer, trace=ctx.snapshot())
-        except AuthError as exc:
-            return _failure_result(page, ctx, exc.result.kind.value, exc.result.detail)
-        except (PlaywrightError, TimeoutError) as exc:
-            return _failure_result(page, ctx, "agent_limitation", str(exc)[:300])
-        finally:
-            browser.close()
+
+    def _run_once() -> RunResult:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=config.headless, **_launch_args())
+            page = browser.new_page()
+            capture = NetworkCapture(page, config.app_url)
+            try:
+                login(page, config, ctx)
+                answer = evaluate_question(
+                    page,
+                    question,
+                    ctx,
+                    endpoint=config.app_url,
+                    route=route,
+                    app_url=config.app_url,
+                    capture=capture,
+                    source={"catalog": "productTable", "orders": "ordersTable"}.get(route, "salesTable"),
+                )
+                return RunResult(answer=answer, trace=ctx.snapshot())
+            except AuthError as exc:
+                return _failure_result(page, ctx, exc.result.kind.value, exc.result.detail)
+            except (PlaywrightError, TimeoutError) as exc:
+                return _failure_result(page, ctx, "agent_limitation", str(exc)[:300])
+            finally:
+                with contextlib.suppress(Exception):
+                    browser.close()
+
+    try:
+        return _run_once()
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        if "Executable doesn't exist" in msg or "playwright install" in msg:
+            import subprocess as _sp
+
+            for _cmd in (
+                ["playwright", "install", "chromium"],
+                ["playwright", "install", "chromium-headless-shell"],
+                ["python", "-m", "playwright", "install", "chromium"],
+            ):
+                try:
+                    _sp.run(_cmd, check=False, timeout=180)
+                except Exception:
+                    continue
+                try:
+                    return _run_once()
+                except Exception:
+                    continue
+        # fallback — browser never started, no screenshot possible
+        from sap_agent.schemas import BugReport
+
+        report = BugReport(
+            title=f"Agent failure — {config.app_url}",
+            actual=msg[:300],
+            artifacts=[],
+            trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
+        )
+        return RunResult(report=report, trace=ctx.snapshot(), error=msg[:300])
 
 
 def _failure_result(page: Any, ctx: SessionContext, kind: str, detail: str) -> RunResult:

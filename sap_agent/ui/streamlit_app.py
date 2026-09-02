@@ -21,17 +21,40 @@ except Exception:
 
 # Ensure Chromium is installed for Playwright (Streamlit Cloud post-install)
 try:
-    import os as _os3
-    import pathlib as _pl
+    import pathlib as _pl2
+    import subprocess as _sp2
 
-    import playwright as _pw
-
-    _chromium_marker = _pl.Path(_pw.__file__).parent / "driver" / "package" / "lib" / "server" / "chromium"
-    if not list(_chromium_marker.glob("*")):
-        import subprocess as _sp
-
-        _sp.run(["playwright", "install", "chromium"], check=False, timeout=120)
-        _os3.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+    _found = False
+    for _base in [
+        _pl2.Path.home() / ".cache" / "ms-playwright",
+        _pl2.Path.home() / "Library" / "Caches" / "ms-playwright",
+        _pl2.Path("/home/appuser/.cache/ms-playwright"),
+    ]:
+        if _base.exists() and any(_base.glob("chromium*")):
+            _found = True
+            break
+    if not _found:
+        # install both chromium and headless shell; --with-deps fails without sudo on Cloud,
+        # so try without, then fallback
+        for _cmd in (
+            ["playwright", "install", "chromium"],
+            ["playwright", "install", "chromium-headless-shell"],
+            ["python", "-m", "playwright", "install", "chromium"],
+        ):
+            try:
+                _sp2.run(_cmd, check=False, timeout=180)
+                # re-check
+                for _base in [
+                    _pl2.Path.home() / ".cache" / "ms-playwright",
+                    _pl2.Path("/home/appuser/.cache/ms-playwright"),
+                ]:
+                    if _base.exists() and any(_base.glob("chromium*")):
+                        _found = True
+                        break
+                if _found:
+                    break
+            except Exception:
+                continue
 except Exception:
     pass
 
