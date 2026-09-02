@@ -109,7 +109,7 @@ class TestLoadScenarios:
 
     def test_app_config_present(self) -> None:
         cfg = load_scenarios()
-        assert cfg["app_url"] == "http://localhost:8080"
+        assert cfg["app_url"] == "https://jonasperegrino.github.io/sap-fiori/"
         # Credentials come from env vars (SAP_AGENT_USER / SAP_AGENT_PASSWORD),
         # not from scenarios.json — no hardcoded passwords in the repo.
         assert "password" not in cfg

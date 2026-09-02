@@ -395,7 +395,7 @@ class DiffReport(BaseModel):
 class Config(BaseModel):
     """Agent configuration driven by env vars (prefix SAP_AGENT_)."""
 
-    app_url: str = Field(default="http://localhost:8080")
+    app_url: str = Field(default="https://jonasperegrino.github.io/sap-fiori/")
     username: str = ""
     password: SecretStr = SecretStr("")
     login_timeout_ms: int = Field(default=30_000, ge=1_000)
@@ -423,7 +423,7 @@ class Config(BaseModel):
         import os
 
         env: dict[str, Any] = {
-            "app_url": os.environ.get("SAP_AGENT_URL", "http://localhost:8080"),
+            "app_url": os.environ.get("SAP_AGENT_URL", "https://jonasperegrino.github.io/sap-fiori/"),
             "username": os.environ.get("SAP_AGENT_USER", ""),
             "password": SecretStr(os.environ.get("SAP_AGENT_PASSWORD", "")),
             "log_level": os.environ.get("SAP_AGENT_LOG_LEVEL", "INFO"),

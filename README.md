@@ -2,7 +2,7 @@
 
 Autonomous agent over a SAP Fiori / UI5 app: discovers pages + data, answers questions with typed evidence, audits accessibility/UX across every route, and files reproducible bug reports. Deterministic-by-default; LLM is an optional fallback.
 
-Fiori demo app lives in `../fiori-app` (future separate repo/deployable).
+Fiori demo app live at **https://jonasperegrino.github.io/sap-fiori/** (repo `../sap-fiori`, GitHub Pages). Local `../fiori-app` still works via `FIORI_APP_DIR`.
 
 ## Quick start
 
@@ -10,17 +10,14 @@ Fiori demo app lives in `../fiori-app` (future separate repo/deployable).
 uv sync
 uv run playwright install chromium   # one-time
 
-# fiori app must be up (in another terminal or via docker)
-make -C ../fiori-app serve          # :8080
-# or
-make docker-up                       # 127.0.0.1:8080 via nginx
-
-# run the agent
-SAP_AGENT_USER=demo SAP_AGENT_PASSWORD=password123 SAP_AGENT_URL=http://localhost:8080 \
+# live app (no local server needed)
+SAP_AGENT_USER=demo SAP_AGENT_PASSWORD=password123 \
   uv run python -m sap_agent.cli login
+# SAP_AGENT_URL defaults to https://jonasperegrino.github.io/sap-fiori/
+# override locally: SAP_AGENT_URL=http://localhost:8080 ...
 
 # Streamlit operator UI
-make ui   # -> http://localhost:8501 (needs fiori-app on :8080)
+make ui   # -> http://localhost:8501 (defaults to live app)
 ```
 
 Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secure prompt, never argv.
@@ -43,8 +40,8 @@ Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secur
 make test    # pytest + 80% coverage gate (193 tests)
 make lint    # ruff
 make check   # lint + test
-make eval    # 19 deterministic scenarios (needs fiori-app on :8080)
-make demo    # interactive QA walk with colored terminal output (auto-starts fiori-app if needed)
+make eval    # 19 deterministic scenarios (defaults to live app; SAP_AGENT_URL=http://localhost:8080 for local)
+make demo    # interactive QA walk with colored terminal output
 ```
 
 Each `make eval` run persists `artifacts/eval_runs/<ts>.json` + `history.md` trend.
@@ -70,10 +67,11 @@ agent/
 
 ## Deployment
 
-- **Agent**: `uv` Python 3.12+, Playwright chromium. `streamlit_app.py` is the Streamlit entrypoint (`streamlit run streamlit_app.py` or `make ui`). Env `SAP_AGENT_URL` points at the deployed fiori-app URL. `SAP_AGENT_LLM_*` optional for NL aggregate questions.
-- **Fiori app**: deploy `../fiori-app` separately (see its README/Dockerfile). This agent has no bundled fiori-app — `FIORI_APP_DIR` env (default `../fiori-app`) overrides local path for `make vendor-ui5` / `make demo` / `docker-up`.
+- **Agent — Streamlit Cloud**: `streamlit_app.py` is the entrypoint. Connect repo, set Python 3.12, secrets `SAP_AGENT_URL=https://jonasperegrino.github.io/sap-fiori/` (default), `SAP_AGENT_USER`/`PASSWORD`. Cloud installs via `requirements.txt` + `packages.txt` (chromium deps) and `playwright install chromium` on first run. Local: `uv run streamlit run streamlit_app.py` or `make ui`.
+- **Fiori app**: live at `https://jonasperegrino.github.io/sap-fiori/` (GitHub Pages, repo `../sap-fiori`). Local fallback: `../fiori-app` or `FIORI_APP_DIR` for `make vendor-ui5` / `make demo` / `docker-up`.
+- **Env**: `SAP_AGENT_LLM_*` optional for NL aggregate questions.
 
 ## Config
 
-`SAP_AGENT_URL` (default `http://localhost:8080`), `SAP_AGENT_USER`, `SAP_AGENT_PASSWORD`, `SAP_AGENT_LLM_API_KEY` / `MODEL` / `BASE_URL` / `PROVIDER` / `TIMEOUT_S`, retry/nav/extract timeouts. See `sap_agent/schemas.py:396`.
+`SAP_AGENT_URL` (default `https://jonasperegrino.github.io/sap-fiori/`), `SAP_AGENT_USER`, `SAP_AGENT_PASSWORD`, `SAP_AGENT_LLM_API_KEY` / `MODEL` / `BASE_URL` / `PROVIDER` / `TIMEOUT_S`, retry/nav/extract timeouts. See `sap_agent/schemas.py:396`. Streamlit Cloud secrets mirror env vars via `st.secrets`.
 # sap-agent

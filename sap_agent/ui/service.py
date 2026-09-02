@@ -28,11 +28,21 @@ class RunResult:
     error: str = ""
 
 
+def _launch_args() -> dict:
+    """Chromium args for Streamlit Cloud / sandboxed envs."""
+    import os
+
+    # Streamlit Cloud runs as non-root without sandbox
+    if os.environ.get("STREAMLIT_RUNTIME") or os.environ.get("STREAMLIT_CLOUD"):
+        return {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+    return {}
+
+
 def run_question(config: Config, question: str, route: str | None = None) -> RunResult:
     """Answer a question and automatically draft a report when the run fails."""
     ctx = SessionContext(config)
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=config.headless)
+        browser = pw.chromium.launch(headless=config.headless, **_launch_args())
         page = browser.new_page()
         capture = NetworkCapture(page, config.app_url)
         try:

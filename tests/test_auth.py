@@ -64,7 +64,7 @@ class TestConfigFromEnv:
         monkeypatch.delenv("SAP_AGENT_USER", raising=False)
         monkeypatch.delenv("SAP_AGENT_PASSWORD", raising=False)
         cfg = Config.from_env()
-        assert cfg.app_url == "http://localhost:8080"
+        assert cfg.app_url == "https://jonasperegrino.github.io/sap-fiori/"
         assert not cfg.has_credentials()
 
     def test_env_values(self, monkeypatch: pytest.MonkeyPatch) -> None:

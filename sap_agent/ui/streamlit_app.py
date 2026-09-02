@@ -9,6 +9,32 @@ import streamlit as st
 from sap_agent.schemas import Config
 from sap_agent.ui.service import RunResult, run_question
 
+# Streamlit Cloud: inject secrets into env so Config.from_env picks them up
+try:
+    import os as _os2
+
+    for _k in ("SAP_AGENT_URL", "SAP_AGENT_USER", "SAP_AGENT_PASSWORD", "SAP_AGENT_LLM_API_KEY"):
+        if _k in st.secrets and _k not in _os2.environ:
+            _os2.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
+
+# Ensure Chromium is installed for Playwright (Streamlit Cloud post-install)
+try:
+    import os as _os3
+    import pathlib as _pl
+
+    import playwright as _pw
+
+    _chromium_marker = _pl.Path(_pw.__file__).parent / "driver" / "package" / "lib" / "server" / "chromium"
+    if not list(_chromium_marker.glob("*")):
+        import subprocess as _sp
+
+        _sp.run(["playwright", "install", "chromium"], check=False, timeout=120)
+        _os3.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+except Exception:
+    pass
+
 st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
 
 st.markdown(
@@ -134,7 +160,10 @@ if "last_result" not in st.session_state:
 
 with st.sidebar:
     st.header("Connection")
-    app_url = st.text_input("App URL", value="http://localhost:8080")
+    import os as _os
+
+    _default_url = _os.environ.get("SAP_AGENT_URL", "https://jonasperegrino.github.io/sap-fiori/")
+    app_url = st.text_input("App URL", value=_default_url)
     username = st.text_input("Username", value="demo")
     password = st.text_input("Password", type="password", value="password123")
     st.caption("Demo: demo / password123")

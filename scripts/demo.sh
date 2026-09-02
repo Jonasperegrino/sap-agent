@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 # fiori-app lives in ../fiori-app when deployed separately
 FIORI_APP_DIR="${FIORI_APP_DIR:-../fiori-app}"
 
-APP_URL="${SAP_AGENT_URL:-http://localhost:8080}"
+APP_URL="${SAP_AGENT_URL:-https://jonasperegrino.github.io/sap-fiori/}"
 export SAP_AGENT_USER="${SAP_AGENT_USER:-demo}"
 export SAP_AGENT_PASSWORD="${SAP_AGENT_PASSWORD:-password123}"
 export SAP_AGENT_URL="$APP_URL"
@@ -38,6 +38,10 @@ wait_for_app() {
 }
 
 if ! curl -fsS -o /dev/null "$APP_URL/" 2>/dev/null; then
+  if [[ "$APP_URL" == *"github.io"* ]] || [[ "$APP_URL" == https://* ]]; then
+    echo "demo: live app not reachable at $APP_URL — check network" >&2
+    exit 1
+  fi
   echo "demo: no server at $APP_URL — starting one ($FIORI_APP_DIR)"
   python3 -m http.server 8080 -d "$FIORI_APP_DIR" >/tmp/poc_serve.log 2>&1 &
   SERVER_PID=$!
@@ -45,9 +49,9 @@ if ! curl -fsS -o /dev/null "$APP_URL/" 2>/dev/null; then
   wait_for_app
 fi
 
-if [ ! -f "$FIORI_APP_DIR/resources/sap-ui-core.js" ]; then
+if [[ "$APP_URL" != *"github.io"* ]] && [ ! -f "$FIORI_APP_DIR/resources/sap-ui-core.js" ]; then
   echo "demo: vendoring OpenUI5 runtime (one-time download, ~1 min)"
-  bash "$FIORI_APP_DIR/scripts/vendor_ui5.sh"
+  bash "$FIORI_APP_DIR/scripts/vendor_ui5.sh" 2>/dev/null || true
 fi
 
 echo "demo: running full QA workflow against $APP_URL"

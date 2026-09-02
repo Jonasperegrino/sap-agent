@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+artifacts/
+.streamlit/secrets.toml
+.env
+.env.*
+playwright-report/
+test-results/
