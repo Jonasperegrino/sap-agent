@@ -78,7 +78,7 @@ for _bp in [
         if _bg_img:
             break
 
-_bg_css = '"url(data:image/jpeg;base64,' + _bg_img + ') center/cover fixed no-repeat"' if _bg_img else "none"
+_bg_css = f"data:image/jpeg;base64,{_bg_img}" if _bg_img else "none"
 
 
 def _make_css() -> str:
@@ -89,10 +89,14 @@ def _make_css() -> str:
         '[data-testid="stHeader"] { background: transparent !important; }'
         'header[data-testid="stHeader"] { background: transparent !important; }'
         '[data-testid="stAppViewContainer"] { background-color: #0a0f1a;'
-        " background-image: " + _bg_css + ";"
+        " background-image: url(" + _bg_css + ");"
         " background-size: cover; background-position: center;"
         " background-attachment: fixed; background-repeat: no-repeat;"
         " color: #e2e8f0; min-height: 100vh; }"
+        '[data-testid="stAppViewContainer"] > div:first-child {'
+        " max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }"
+        " @media (min-width: 768px) {"
+        ' [data-testid="stAppViewContainer"] > div:first-child { padding: 3rem 2rem; } }'
         '[data-testid="stAppViewBlockContainer"] { background: transparent; }'
         '[data-testid="stSidebar"] { background: #0f172a; border-right: 1px solid rgba(0,212,255,0.12); }'
         '[data-testid="stSidebar"] label, [data-testid="stSidebar"] p, '
@@ -149,29 +153,6 @@ def _make_css() -> str:
 
 
 st.markdown(_make_css(), unsafe_allow_html=True)
-
-# World map — fixed img behind, small JPEG (42KB)
-try:
-    import base64
-
-    _p = Path(__file__).parent / "assets" / "worldmap_small.jpg"
-    if _p.exists():
-        _b64 = base64.b64encode(_p.read_bytes()).decode()
-        st.markdown(
-            f'<img src="data:image/jpeg;base64,{_b64}" '
-            'style="position:fixed;inset:0;width:100%;height:100%;'
-            'object-fit:cover;opacity:0.13;z-index:0;pointer-events:none;" />',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            """<style>
-            [data-testid="stApp"],[data-testid="stAppViewContainer"]{background:transparent !important;}  # noqa: F821
-            [data-testid="stMain"],[data-testid="stSidebar"]{position:relative;z-index:1;}  # noqa: F821
-            </style>""",
-            unsafe_allow_html=True,
-        )
-except Exception:
-    pass
 
 st.markdown('<div class="atlas-title">Atlas for SAP</div>', unsafe_allow_html=True)
 st.markdown('<div class="atlas-sub">Autonomous SAP Fiori discovery & Q&A agent</div>', unsafe_allow_html=True)
