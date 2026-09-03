@@ -62,14 +62,21 @@ st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
 
 # Load background image as base64 for CSS
 _bg_img = ""
-try:
-    import base64
-
-    _bp = Path(__file__).parent / "assets" / "worldmap_small.jpg"
+for _bp in [
+    Path(__file__).parent / "assets" / "worldmap_small.jpg",
+    Path(__file__).parent.parent / "sap_agent" / "ui" / "assets" / "worldmap_small.jpg",
+    Path.cwd() / "sap_agent" / "ui" / "assets" / "worldmap_small.jpg",
+    Path(__file__).resolve().parent / "assets" / "worldmap_small.jpg",
+]:
     if _bp.exists():
-        _bg_img = base64.b64encode(_bp.read_bytes()).decode()
-except Exception:
-    pass
+        try:
+            import base64
+
+            _bg_img = base64.b64encode(_bp.read_bytes()).decode()
+        except Exception:
+            pass
+        if _bg_img:
+            break
 
 _bg_css = '"url(data:image/jpeg;base64,' + _bg_img + ') center/cover fixed no-repeat"' if _bg_img else "none"
 
@@ -81,7 +88,11 @@ def _make_css() -> str:
         "* { font-family: 'Inter', system-ui, -apple-system, sans-serif; }"
         '[data-testid="stHeader"] { background: transparent !important; }'
         'header[data-testid="stHeader"] { background: transparent !important; }'
-        '[data-testid="stAppViewContainer"] { background: #0a0f1a ' + _bg_css + " !important; color: #e2e8f0; }"
+        '[data-testid="stAppViewContainer"] { background-color: #0a0f1a;'
+        " background-image: " + _bg_css + ";"
+        " background-size: cover; background-position: center;"
+        " background-attachment: fixed; background-repeat: no-repeat;"
+        " color: #e2e8f0; min-height: 100vh; }"
         '[data-testid="stAppViewBlockContainer"] { background: transparent; }'
         '[data-testid="stSidebar"] { background: #0f172a; border-right: 1px solid rgba(0,212,255,0.12); }'
         '[data-testid="stSidebar"] label, [data-testid="stSidebar"] p, '
