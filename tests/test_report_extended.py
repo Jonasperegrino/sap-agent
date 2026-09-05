@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fakes import PageStub
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from sap_agent.context import SessionContext
@@ -25,12 +26,12 @@ class FakeTableLocator:
         return []
 
 
-class FakePage:
+class FakePage(PageStub):
     def __init__(self) -> None:
         self.url = "http://localhost:8080/#/dashboard"
         self._screenshot = b"fake-png"
 
-    def screenshot(self) -> bytes:
+    def screenshot(self, **kwargs) -> bytes:
         return self._screenshot
 
     def locator(self, selector: str):

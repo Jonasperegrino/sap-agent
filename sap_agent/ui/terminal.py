@@ -8,9 +8,12 @@ never touched by this module.
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from ..schemas import QaReport, Severity
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _CODE = {
     "reset": "\033[0m",
@@ -32,6 +35,14 @@ _SEVERITY_COLOR = {
 
 _enabled = sys.stdout.isatty()
 
+#: widest a box/line may grow; a11y findings carry 120ch outerHTML and would
+#: otherwise stretch the summary past any terminal.
+_MAX_WIDTH = 100
+
+
+def _truncate(text: str, limit: int = _MAX_WIDTH) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
 
 def set_color_enabled(value: bool) -> None:
     global _enabled
@@ -45,31 +56,36 @@ def _paint(text: str, color: str = "") -> str:
 
 
 def print_header(title: str) -> None:
-    width = max(len(title), 40) + 4
+    width = min(max(len(title), 40) + 4, _MAX_WIDTH)
     print(_paint("═" * width, "cyan"))
-    print(_paint(f"  {title}", "bold") + " " * (width - len(title) - 2))
+    print(
+        _paint(f"  {_truncate(title, width - 2)}", "bold")
+        + " " * (width - len(title) - 2 if len(title) < width - 2 else 0)
+    )
     print(_paint("═" * width, "cyan"))
 
 
-def print_step(step: int, total: int, text: str) -> None:
-    print(_paint(f"step {step}/{total}", "cyan") + f"  {text}")
+def print_step(step: int, total: int, text: str, elapsed_s: float | None = None) -> None:
+    suffix = f" ({elapsed_s:.1f}s)" if elapsed_s is not None else ""
+    print(_paint(f"step {step}/{total}", "cyan") + f"  {_truncate(text)}{suffix}")
 
 
 def print_issue(category: str, issue_type: str, severity: Severity, element: str) -> None:
     tag = _paint(f"[{category.upper()}]", _SEVERITY_COLOR.get(severity.value, ""))
     level = _paint(f"{severity.value.upper():6s}", _SEVERITY_COLOR.get(severity.value, ""))
-    print(f"  {tag} {level} {issue_type:22s} {element}")
+    print(f"  {tag} {level} {issue_type:22s} {_truncate(element)}")
 
 
 def _box(title: str, rows: Sequence[tuple[str, str]]) -> None:
-    text_col = max([len(title) - 2] + [len(a) for a, _ in rows] + [len(b) for _, b in rows])
+    rows = [(a, b) for a, b in rows]
+    text_col = min(max([len(title) - 2] + [len(a) for a, _ in rows] + [len(b) for _, b in rows]), _MAX_WIDTH - 8)
     stretch = max(text_col, 24)
     line = "─" * (stretch + 8)
     print("┌" + line + "┐")
-    print("│ " + _paint(f"{title:<{stretch + 3}}", "bold") + " │")
+    print("│ " + _paint(f"{_truncate(title, stretch + 3):<{stretch + 3}}", "bold") + " │")
     print("├" + line + "┤")
     for a, b in rows:
-        print(f"│ {a:<{stretch}} │ {b:<3} │")
+        print(f"│ {_truncate(a, stretch):<{stretch}} │ {_truncate(b, 3):<3} │")
     print("└" + line + "┘")
 
 

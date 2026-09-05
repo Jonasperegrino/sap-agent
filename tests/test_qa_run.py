@@ -4,21 +4,24 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from fakes import PageStub
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, QaPageReport, ScreenshotResult
 from sap_agent.tools.qa import _audit_page, run_qa
 
 
-def FakeScreenshot(route: str = "x") -> ScreenshotResult:
+def fake_screenshot(route: str = "x") -> ScreenshotResult:
     return ScreenshotResult(route=route, path="s.png", width=1280, height=800)
 
 
-class FakePage:
+class FakePage(PageStub):
     def __init__(self) -> None:
         self.url = "http://localhost:8080/#/dashboard"
         self._eval_results: list[object] = []
 
-    def evaluate(self, expr: str):
+    def evaluate(self, expression: str, arg=None, **kwargs):
         if self._eval_results:
             return self._eval_results.pop(0)
         return None
@@ -28,10 +31,15 @@ class FakeCapture:
     def __init__(self) -> None:
         self._urls: list[str] = []
 
-    def capture_response_urls(self) -> list[str]:
+    def capture_response_urls(self, url_substring: str | None = None) -> list[str]:
+        if url_substring:
+            return [u for u in self._urls if url_substring in u]
         return self._urls
 
     def latest_response_body(self, url_substring: str):
+        return None
+
+    def response_body(self, url: str):
         return None
 
 
@@ -43,7 +51,7 @@ def _ctx() -> SessionContext:
 @patch("sap_agent.tools.qa._performance_hints", return_value=["hint1"])
 @patch("sap_agent.tools.qa.critique_ux", return_value=[])
 @patch("sap_agent.tools.qa.audit_accessibility", return_value=[])
-@patch("sap_agent.tools.qa.capture_page", return_value=FakeScreenshot("dashboard"))
+@patch("sap_agent.tools.qa.capture_page", return_value=fake_screenshot("dashboard"))
 @patch("sap_agent.tools.qa.navigate")
 def test_audit_page_calls_all_tools(mock_nav, mock_cap, mock_a11y, mock_ux, mock_perf) -> None:
     page = FakePage()
@@ -62,9 +70,9 @@ def test_audit_page_calls_all_tools(mock_nav, mock_cap, mock_a11y, mock_ux, mock
 @patch("sap_agent.tools.qa._performance_hints", return_value=[])
 @patch("sap_agent.tools.qa.critique_ux", return_value=[])
 @patch("sap_agent.tools.qa.audit_accessibility", return_value=[])
-@patch("sap_agent.tools.qa.capture_page", return_value=FakeScreenshot())
+@patch("sap_agent.tools.qa.capture_page", return_value=fake_screenshot())
 @patch("sap_agent.tools.qa._align_severities")
-@patch("sap_agent.tools.qa.open_first_row", side_effect=Exception("no row"))
+@patch("sap_agent.tools.qa.open_first_row", side_effect=PlaywrightTimeoutError("no row"))
 @patch("sap_agent.tools.qa.go_back")
 @patch("sap_agent.tools.qa.navigate")
 def test_run_qa_covers_all_routes(
@@ -81,7 +89,7 @@ def test_run_qa_covers_all_routes(
 @patch("sap_agent.tools.qa._performance_hints", return_value=["slow"])
 @patch("sap_agent.tools.qa.critique_ux", return_value=[])
 @patch("sap_agent.tools.qa.audit_accessibility", return_value=[])
-@patch("sap_agent.tools.qa.capture_page", return_value=FakeScreenshot())
+@patch("sap_agent.tools.qa.capture_page", return_value=fake_screenshot())
 @patch("sap_agent.tools.qa._align_severities")
 @patch("sap_agent.tools.qa.navigate")
 def test_run_qa_progress_callback(mock_nav, mock_align, mock_cap, mock_a11y, mock_ux, mock_perf) -> None:
@@ -97,7 +105,7 @@ def test_run_qa_progress_callback(mock_nav, mock_align, mock_cap, mock_a11y, moc
 @patch("sap_agent.tools.qa._performance_hints", return_value=[])
 @patch("sap_agent.tools.qa.critique_ux", return_value=[])
 @patch("sap_agent.tools.qa.audit_accessibility", return_value=[])
-@patch("sap_agent.tools.qa.capture_page", return_value=FakeScreenshot())
+@patch("sap_agent.tools.qa.capture_page", return_value=fake_screenshot())
 @patch("sap_agent.tools.qa._align_severities")
 @patch("sap_agent.tools.qa.open_first_row")
 @patch("sap_agent.tools.qa.go_back")

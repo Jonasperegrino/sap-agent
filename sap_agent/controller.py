@@ -19,16 +19,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page
 
 from .context import SessionContext
+from .protocols import PageLike
 from .schemas import AgentResult, Config, FailureKind, PlannerDecision, StepResult, StepStatus
 from .tools.auth import AuthError
 from .tools.report import should_retry
 
 logger = logging.getLogger(__name__)
 
-Step = Callable[[Page, SessionContext], StepResult]
+Step = Callable[[PageLike, SessionContext], StepResult]
 
 _DEFAULT_BUDGET = 20
 _DEFAULT_STUCK_THRESHOLD = 3
@@ -68,7 +68,7 @@ class AgentLoop:
     def __init__(
         self,
         config: Config,
-        page: Page,
+        page: PageLike,
         ctx: SessionContext,
         *,
         budget: int = _DEFAULT_BUDGET,
@@ -313,7 +313,7 @@ class AgentLoop:
                 tool="auth",
                 action="login",
                 status=StepStatus.FAILURE,
-                outcome=result.kind.value,
+                outcome=result.kind_value(),
                 detail=result.detail,
                 url=result.landing_url,
                 transient=result.transient,
@@ -327,6 +327,16 @@ class AgentLoop:
                 outcome="exception",
                 detail=str(exc)[:300],
                 transient=True,
+            )
+        except Exception as exc:
+            logger.warning("step raised %s: %s", type(exc).__name__, exc)
+            return StepResult(
+                tool="step",
+                action="run",
+                status=StepStatus.FAILURE,
+                outcome="exception",
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+                transient=False,
             )
 
     def _record(self, result: StepResult) -> None:

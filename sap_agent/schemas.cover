@@ -1,0 +1,488 @@
+    1: """Typed artifacts shared across the agent. No secrets may appear in these structures."""
+
+    1: from __future__ import annotations
+
+    1: from enum import StrEnum
+    1: from typing import Any
+
+    1: from pydantic import BaseModel, Field, SecretStr
+
+
+    2: class AuthFailureKind(StrEnum):
+    1:     """Taxonomy of authentication failures (issue #645)."""
+
+    1:     BAD_CREDENTIALS = "bad_credentials"
+    1:     TIMEOUT = "timeout"
+    1:     ELEMENT_NOT_FOUND = "element_not_found"
+    1:     REDIRECT_LOOP = "redirect_loop"
+    1:     SSO_UNSUPPORTED = "sso_unsupported"
+    1:     NETWORK_ERROR = "network_error"
+
+
+    2: TRANSIENT_FAILURES = frozenset(
+    1:     {
+    1:         AuthFailureKind.TIMEOUT,
+    1:         AuthFailureKind.ELEMENT_NOT_FOUND,
+    1:         AuthFailureKind.NETWORK_ERROR,
+           }
+       )
+
+
+    2: class AuthResult(BaseModel):
+    1:     """Outcome of a login attempt. `detail` is always sanitized (no secrets)."""
+
+    1:     ok: bool
+    1:     kind: AuthFailureKind | None = None
+    1:     landing_url: str | None = None
+    1:     detail: str = ""
+    1:     attempts: int = Field(ge=1)
+           #: by route, e.g. `#/dashboard` — used as post-login verification target
+    1:     verified_route: str | None = None
+
+    2:     @property
+    2:     def transient(self) -> bool:
+               return self.kind in TRANSIENT_FAILURES
+
+    1:     def kind_value(self) -> str:
+               """Failure-kind string; 'unknown' when unset (success results)."""
+               return self.kind.value if self.kind is not None else "unknown"
+
+    1:     def sanitized(self) -> dict[str, Any]:
+               """Serializable form guaranteed free of credentials."""
+               return self.model_dump()
+
+
+    2: class TraceEntry(BaseModel):
+    1:     """One recorded agent action (trace stream, JSONL-friendly)."""
+
+    1:     tool: str
+    1:     action: str
+    1:     outcome: str
+    1:     url: str | None = None
+    1:     detail: str = ""
+
+
+    2: class QuestionIntent(StrEnum):
+    1:     """Supported MVP question classes (#647)."""
+
+    1:     COUNT_TOTAL = "count_total"  # "how many orders are there?"
+    1:     COUNT_WHERE = "count_where"  # "how many orders were built in 2026?"
+    1:     EXISTENCE = "existence"  # "is there any approved order?"
+    1:     LOOKUP = "lookup"  # "find the order for Acme Corp"
+    1:     AGGREGATE = "aggregate"  # "revenue of top 3 clients last year" -> sum/group/sort/limit
+    1:     UNSUPPORTED = "unsupported"
+
+
+    2: class IntentConfig(BaseModel):
+    1:     """Parsed intent: what to count, filter on, and how to compare."""
+
+    1:     intent: QuestionIntent = QuestionIntent.UNSUPPORTED
+    1:     column: str | None = None
+    1:     value: str | None = None
+    1:     comparer: str = "exact"  # exact | year
+    1:     follow_up: str = ""
+           # aggregate extensions (LLM slot #647): sum/avg/count grouped + ranked
+    1:     aggregation: str | None = None  # sum | avg | count
+    1:     aggregation_column: str | None = None  # e.g. amount
+    1:     group_by: str | None = None  # e.g. customer
+    1:     limit: int | None = None
+    1:     sort_order: str = "desc"
+
+
+    2: class AnswerEvidence(BaseModel):
+    1:     """Where an answer came from — reproducible source context (#647)."""
+
+    1:     source: str = ""
+    1:     column: str = ""
+    1:     matched_rows: int = 0
+    1:     endpoint: str | None = None
+
+
+    2: class AnsweredQuestion(BaseModel):
+    1:     """Deterministic answer with evidence. No invented data, ever."""
+
+    1:     question: str
+    1:     intent: QuestionIntent = QuestionIntent.UNSUPPORTED
+    1:     answer: int | list[dict[str, Any]] | None = None
+    1:     not_found: bool = False
+    1:     unsupported: bool = False
+    1:     message: str = ""
+    1:     evidence: AnswerEvidence = AnswerEvidence()
+    1:     confidence: str = "none"
+    1:     follow_up: str = ""
+    1:     checksum: str = ""
+
+
+    2: class DiscoveredTable(BaseModel):
+    1:     """A data-bearing table found during discovery (#646)."""
+
+    1:     name: str = ""
+    1:     columns: list[str] = Field(default_factory=list)
+    1:     row_count: int = 0
+    1:     endpoint: str | None = None
+
+
+    2: class DiscoveredEntity(BaseModel):
+    1:     """Business entity grouped by endpoint stem, e.g. sales <- sales.json."""
+
+    1:     name: str = ""
+    1:     tables: list[DiscoveredTable] = Field(default_factory=list)
+    1:     endpoints: list[str] = Field(default_factory=list)
+
+
+    2: class AppSummary(BaseModel):
+    1:     """Structured app map: areas, entities, filters, tables, actions, domain."""
+
+    1:     app_name: str = ""
+    1:     areas: list[str] = Field(default_factory=list)
+    1:     entities: list[DiscoveredEntity] = Field(default_factory=list)
+    1:     tables: list[DiscoveredTable] = Field(default_factory=list)
+    1:     filters: list[str] = Field(default_factory=list)
+    1:     forms: list[str] = Field(default_factory=list)
+    1:     actions: list[str] = Field(default_factory=list)
+    1:     services: list[str] = Field(default_factory=list)
+    1:     domain: str = ""
+    1:     ranked_surfaces: list[str] = Field(default_factory=list)
+
+
+    2: class FailureKind(StrEnum):
+    1:     """Agent failure taxonomy beyond auth (issue #648)."""
+
+    1:     NAV_LOOP = "nav_loop"
+    1:     SELECTOR_FAILURE = "selector_failure"
+    1:     INCONSISTENT_LOAD = "inconsistent_load"
+    1:     EMPTY_STATE = "empty_state"
+    1:     BACKEND_ERROR = "backend_error"
+    1:     AGENT_LIMITATION = "agent_limitation"
+
+
+    2: class FailureClass(StrEnum):
+    1:     """Who to blame: the product, the agent, or an unsupported auth flow."""
+
+    1:     PRODUCT_BUG = "product_bug"
+    1:     AGENT_LIMITATION = "agent_limitation"
+    1:     UNSUPPORTED_AUTH_FLOW = "unsupported_auth_flow"
+
+
+    2: class BugReport(BaseModel):
+    1:     """Reproducible bug-report draft (issue #648). Secret-free by construction."""
+
+    1:     title: str = ""
+    1:     expected: str = ""
+    1:     actual: str = ""
+    1:     classification: FailureClass = FailureClass.AGENT_LIMITATION
+    1:     reproduction_steps: list[str] = Field(default_factory=list)
+    1:     environment: dict[str, str] = Field(default_factory=dict)
+    1:     artifacts: list[str] = Field(default_factory=list)
+    1:     trace_tail: list[str] = Field(default_factory=list)
+           #: values scrubbed as [REDACTED] in rendered markdown (never empty by construction)
+    1:     secret_values: list[str] = Field(default_factory=list)
+
+    1:     def _scrub(self, text: str) -> str:
+               for secret in self.secret_values:
+                   if secret:
+                       text = text.replace(secret, "[REDACTED]")
+               return text
+
+    1:     def to_markdown(self) -> str:
+               title = self._scrub(self.title)
+               expected = self._scrub(self.expected)
+               actual = self._scrub(self.actual)
+               lines = [
+                   f"# {title}",
+                   "",
+                   f"**Classification**: `{self.classification.value}`",
+                   "",
+                   "## Expected",
+                   expected,
+                   "",
+                   "## Actual",
+                   actual,
+                   "",
+                   "## Reproduction steps",
+               ]
+               steps = [self._scrub(s) for s in self.reproduction_steps]
+               lines += [f"{i}. {step}" for i, step in enumerate(steps, 1)]
+               lines += [
+                   "",
+                   "## Environment",
+                   "".join(f"- {k}: {self._scrub(v)}" for k, v in sorted(self.environment.items())),
+                   "",
+                   "## Attachments",
+               ]
+               lines += [f"- `{a}`" for a in self.artifacts] or ["- none"]
+               lines += [
+                   "",
+                   "## Last agent actions (trace tail)",
+               ]
+               tail = [self._scrub(t) for t in self.trace_tail]
+               lines += [f"- `{t}`" for t in tail] or ["- none"]
+               return "\n".join(lines) + "\n"
+
+
+    2: class StepStatus(StrEnum):
+    1:     """Outcome of a single agent-loop step (issue #684)."""
+
+    1:     SUCCESS = "success"
+    1:     FAILURE = "failure"
+    1:     SKIPPED = "skipped"
+
+
+    2: class StepResult(BaseModel):
+    1:     """Typed result of one loop step — controller verifies these deterministically."""
+
+    1:     tool: str
+    1:     action: str
+    1:     status: StepStatus = StepStatus.SUCCESS
+    1:     outcome: str = ""  # short machine-readable outcome string (nav-loop key)
+    1:     detail: str = ""
+    1:     url: str | None = None
+           #: optional agent-failure classification (selector_failure, empty_state, ...)
+    1:     kind: FailureKind | None = None
+           #: true when the failure is transient and a state-reset retry may help
+    1:     transient: bool = False
+           #: optional structured payload (e.g. AppSummary) surfaced on AgentResult
+    1:     payload: Any = None
+
+
+    2: class PlannerDecision(BaseModel):
+    1:     """One planner decision: chosen candidate + rationale (#693)."""
+
+    1:     candidate: str
+    1:     rationale: str = ""
+    1:     tool: str = ""
+    1:     action: str = ""
+    1:     status: str = ""
+
+
+    2: class AgentResult(BaseModel):
+    1:     """Emitted when the loop stops: success/failure + evidence (issue #684).
+
+           `outcome` carries the last step's structured payload (e.g. AppSummary) so
+           callers can consume the result without re-reading the browser. `trace` is a
+           serializable copy of the session trace — secret-free by contract.
+           """
+
+    1:     goal: str
+    1:     success: bool
+    1:     steps_used: int
+    1:     budget: int
+    1:     reason: str = ""
+    1:     failure_kind: FailureKind | None = None
+    1:     outcome: Any = None
+    1:     trace: list[TraceEntry] = Field(default_factory=list)
+           #: planner mode only (#693): decided steps + rationale, in order
+    1:     reasoning: list[PlannerDecision] = Field(default_factory=list)
+
+
+    2: class Severity(StrEnum):
+    1:     """Issue severity for QA reports (issue #698 rules)."""
+
+    1:     HIGH = "high"
+    1:     MEDIUM = "medium"
+    1:     LOW = "low"
+
+
+    2: class AccessibilityIssue(BaseModel):
+    1:     """One accessibility finding: type, element, severity, suggestion."""
+
+    1:     type: str
+    1:     element: str
+    1:     severity: Severity = Severity.LOW
+    1:     suggestion: str = ""
+
+
+    2: class UxIssue(BaseModel):
+    1:     """One visual/UX finding: type, element, severity, suggestion, screenshot."""
+
+    1:     type: str
+    1:     element: str = ""
+    1:     severity: Severity = Severity.LOW
+    1:     suggestion: str = ""
+    1:     screenshot: str = ""
+
+
+    2: class ScreenshotResult(BaseModel):
+    1:     """Metadata for a captured screenshot (issue #686)."""
+
+    1:     route: str
+    1:     path: str
+    1:     width: int = 0
+    1:     height: int = 0
+    1:     captured_at: str = ""
+    1:     element: str = ""
+
+
+    2: class QaPageReport(BaseModel):
+    1:     """Per-page QA findings: screenshots, accessibility + UX issues, perf hints."""
+
+    1:     route: str
+    1:     screenshots: list[ScreenshotResult] = Field(default_factory=list)
+    1:     accessibility_issues: list[AccessibilityIssue] = Field(default_factory=list)
+    1:     ux_issues: list[UxIssue] = Field(default_factory=list)
+    1:     performance_hints: list[str] = Field(default_factory=list)
+
+
+    2: class QaReport(BaseModel):
+    1:     """Full QA run: every audited page + roll-up summary (issue #685)."""
+
+    1:     app_url: str
+    1:     generated_at: str = ""
+    1:     pages: list[QaPageReport] = Field(default_factory=list)
+
+    2:     @property
+    2:     def total_issues(self) -> int:
+               return sum(len(p.accessibility_issues) + len(p.ux_issues) for p in self.pages)
+
+    1:     def counts_by_severity(self) -> dict[str, int]:
+               counts = {s.value: 0 for s in Severity}
+               for page in self.pages:
+                   for issue in [*page.accessibility_issues, *page.ux_issues]:
+                       counts[issue.severity.value] += 1
+               return counts
+
+    1:     def to_markdown(self) -> str:
+               """Human-readable report (#674); mirrors the JSON artifact."""
+               counts = self.counts_by_severity()
+               lines = [
+                   f"# QA Report — {self.app_url}",
+                   "",
+                   f"Generated: {self.generated_at or '-'}",
+                   "",
+                   (
+                       f"**Pages**: {len(self.pages)} · **Issues**: {self.total_issues} "
+                       f"(high {counts[Severity.HIGH.value]}, medium {counts[Severity.MEDIUM.value]}, "
+                       f"low {counts[Severity.LOW.value]})"
+                   ),
+                   "",
+               ]
+               for page in self.pages:
+                   lines += [f"## {page.route}", ""]
+                   for shot in page.screenshots:
+                       lines.append(f"- screenshot: `{shot.path}` ({shot.width}x{shot.height})")
+                   for issue in page.accessibility_issues:
+                       lines.append(f"- [a11y/{issue.severity.value}] {issue.type}: {issue.element} — {issue.suggestion}")
+                   for issue in page.ux_issues:
+                       lines.append(f"- [ux/{issue.severity.value}] {issue.type}: {issue.element} — {issue.suggestion}")
+                   for hint in page.performance_hints:
+                       lines.append(f"- [perf] {hint}")
+                   lines.append("")
+               return "\n".join(lines).rstrip() + "\n"
+
+
+    2: class DiffIssue(BaseModel):
+    1:     """One issue placed across two QA runs (#694)."""
+
+    1:     route: str
+    1:     source: str  # "a11y" | "ux"
+    1:     type: str
+    1:     element: str = ""
+    1:     severity: Severity = Severity.LOW
+           #: new | persistent | resolved
+    1:     status: str = "new"
+
+
+    2: class DiffReport(BaseModel):
+    1:     """Cross-run comparison of two QaReports (#694)."""
+
+    1:     old_generated_at: str = ""
+    1:     new_generated_at: str = ""
+    1:     issues: list[DiffIssue] = Field(default_factory=list)
+
+    1:     def counts_by_status(self) -> dict[str, int]:
+               counts = {"new": 0, "persistent": 0, "resolved": 0}
+               for issue in self.issues:
+                   counts[issue.status] = counts.get(issue.status, 0) + 1
+               return counts
+
+
+    2: class Config(BaseModel):
+    1:     """Agent configuration driven by env vars (prefix SAP_AGENT_)."""
+
+    1:     app_url: str = Field(default="https://jonasperegrino.github.io/sap-fiori/")
+    1:     username: str = ""
+    1:     password: SecretStr = SecretStr("")
+    1:     login_timeout_ms: int = Field(default=30_000, ge=1_000)
+    1:     retry_budget: int = Field(default=3, ge=1, le=10)
+           #: base delay for exponential backoff between login retries (#680), capped at 5s
+    1:     retry_backoff_s: float = Field(default=0.5, ge=0)
+           #: navigation wait window (#676)
+    1:     nav_timeout_ms: int = Field(default=10_000, ge=1_000)
+           #: table extraction wait window (#676)
+    1:     extract_timeout_ms: int = Field(default=15_000, ge=1_000)
+    1:     headless: bool = True
+    1:     artifacts_dir: str = "artifacts"
+    1:     log_level: str = "INFO"
+           #: post-login route that proves authentication succeeded, e.g. "#/dashboard"
+    1:     success_route: str | None = None
+           #: LLM slot (issue #647 extension): OpenAI-compatible API for intent parsing
+    1:     llm_api_key: SecretStr | None = None
+    1:     llm_model: str = "gpt-5"
+    1:     llm_base_url: str = "https://api.openai.com/v1"
+    1:     llm_provider: str = "openai"  # openai | anthropic | openai-compatible
+    1:     llm_timeout_s: float = Field(default=15.0, ge=1.0)
+
+    2:     @classmethod
+    2:     def from_env(cls, **overrides: Any) -> Config:
+               import os
+
+               def _int(name: str) -> int | None:
+                   raw = os.environ.get(name)
+                   if not raw:
+                       return None
+                   try:
+                       return int(raw)
+                   except ValueError as exc:
+                       raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+               def _float(name: str) -> float | None:
+                   raw = os.environ.get(name)
+                   if not raw:
+                       return None
+                   try:
+                       return float(raw)
+                   except ValueError as exc:
+                       raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+
+               env: dict[str, Any] = {
+                   "app_url": os.environ.get("SAP_AGENT_URL")
+                   or os.environ.get("SAP_AGENT_APP_URL", "https://jonasperegrino.github.io/sap-fiori/"),
+                   "username": os.environ.get("SAP_AGENT_USER", ""),
+                   "password": SecretStr(os.environ.get("SAP_AGENT_PASSWORD", "")),
+                   "log_level": os.environ.get("SAP_AGENT_LOG_LEVEL", "INFO"),
+                   "headless": os.environ.get("SAP_AGENT_HEADLESS", "true").lower() not in {"0", "false", "no"},
+                   "artifacts_dir": os.environ.get("SAP_AGENT_ARTIFACTS_DIR", "artifacts"),
+                   "success_route": os.environ.get("SAP_AGENT_SUCCESS_ROUTE"),
+               }
+               for field, name, parse in (
+                   ("login_timeout_ms", "SAP_AGENT_LOGIN_TIMEOUT_MS", _int),
+                   ("retry_budget", "SAP_AGENT_RETRY_BUDGET", _int),
+                   ("retry_backoff_s", "SAP_AGENT_RETRY_BACKOFF_S", _float),
+                   ("nav_timeout_ms", "SAP_AGENT_NAV_TIMEOUT_MS", _int),
+                   ("extract_timeout_ms", "SAP_AGENT_EXTRACT_TIMEOUT_MS", _int),
+                   ("llm_timeout_s", "SAP_AGENT_LLM_TIMEOUT_S", _float),
+               ):
+                   value = parse(name)
+                   if value is not None:
+                       env[field] = value
+               # LLM env (optional, no hard dependency)
+               raw_llm_key = os.environ.get("SAP_AGENT_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+               if raw_llm_key:
+                   env["llm_api_key"] = SecretStr(raw_llm_key)
+               raw_llm_model = os.environ.get("SAP_AGENT_LLM_MODEL") or os.environ.get("OPENAI_MODEL")
+               if raw_llm_model:
+                   env["llm_model"] = raw_llm_model
+               raw_llm_base = os.environ.get("SAP_AGENT_LLM_BASE_URL")
+               if raw_llm_base:
+                   env["llm_base_url"] = raw_llm_base.rstrip("/")
+               raw_llm_provider = os.environ.get("SAP_AGENT_LLM_PROVIDER")
+               if raw_llm_provider:
+                   env["llm_provider"] = raw_llm_provider
+               env.update({k: v for k, v in overrides.items() if v is not None})
+               return cls(**env)
+
+    1:     def has_credentials(self) -> bool:
+               return bool(self.username and self.password.get_secret_value())
+
+    1:     def has_llm(self) -> bool:
+               return bool(self.llm_api_key and self.llm_api_key.get_secret_value())

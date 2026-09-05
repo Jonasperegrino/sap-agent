@@ -9,6 +9,8 @@ abort on repeated candidates, and reasoning-chain recording.
 
 from __future__ import annotations
 
+from fakes import PageStub
+
 from sap_agent.context import SessionContext
 from sap_agent.controller import AgentLoop, Candidate, evaluate_step_result
 from sap_agent.schemas import Config, FailureKind, StepResult, StepStatus
@@ -16,8 +18,8 @@ from sap_agent.schemas import Config, FailureKind, StepResult, StepStatus
 APP_URL = "http://localhost:8080"
 
 
-class FakePage:
-    def goto(self, url, *, wait_until=None):
+class FakePage(PageStub):
+    def goto(self, url, *, wait_until=None, **kwargs):
         self.last_goto = url
 
 

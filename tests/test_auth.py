@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
+
 from pydantic import SecretStr
 
 from sap_agent.schemas import TRANSIENT_FAILURES, AuthFailureKind, AuthResult, Config
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestClassifyError:
@@ -15,7 +19,7 @@ class TestClassifyError:
         kind = None
         try:
             raise PlaywrightTimeoutError("Timeout 30000ms exceeded")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             from sap_agent.tools.auth import classify_error
 
             kind = classify_error(exc)

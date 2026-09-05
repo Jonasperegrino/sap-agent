@@ -8,17 +8,20 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from playwright.sync_api import Page
-
-from ..context import SessionContext
 from ..schemas import (
     AuthFailureKind,
     BugReport,
     FailureClass,
     FailureKind,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ..context import SessionContext
+    from ..protocols import PageLike
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ def should_retry(kind: str) -> bool:
 
 
 def collect_artifacts(
-    page: Page,
+    page: PageLike,
     ctx: SessionContext,
     *,
     screenshot_name: str = "failure.png",

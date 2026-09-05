@@ -1,0 +1,192 @@
+    1: """Semantic DOM extraction from UI5 controls (architecture D4 `extract`).
+
+       Locators are semantic (control type + column headers), never hardcoded control
+       ids — this is what keeps the suite green across UI5 control-id renames (#652).
+       """
+
+    1: from __future__ import annotations
+
+    1: from dataclasses import dataclass, field
+    1: from typing import TYPE_CHECKING
+
+    1: from playwright.sync_api import Error as PlaywrightError
+    1: from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    1: if TYPE_CHECKING:
+           from ..protocols import PageLike
+
+    1: TABLE_ROLE_SELECTOR = ".sapMTable, .sapMListTbl, table[role='table'], .sapUiTable"
+    1: COLUMN_HEADER_SELECTOR = "th, .sapMColumnHeader, [role='columnheader']"
+       # UI5 keeps previously visited pages in the DOM (hidden) — reads must scope to
+       # the actually visible page or they hit stale tables during the view swap
+       # (multipage app, #660). Each table selector is combined with a `:visible`
+       # page ancestor plus its own `:visible`: appending `:visible` once to the comma
+       # list would only constrain the last entry and still match hidden elements.
+    6: TABLE_VISIBLE_SELECTOR = ", ".join(f".sapMPage:visible {s}:visible" for s in TABLE_ROLE_SELECTOR.split(", "))
+
+
+    3: @dataclass
+    2: class TableData:
+    1:     columns: list[str] = field(default_factory=list)
+    1:     rows: list[list[str]] = field(default_factory=list)
+    1:     row_count: int = 0
+
+    1:     def to_dict(self) -> dict[str, object]:
+               return {"columns": self.columns, "rows": self.rows, "row_count": self.row_count}
+
+
+       #: cap rows per table so huge tables cannot stall QA via N+1 roundtrips (perf)
+    1: DEFAULT_MAX_ROWS = 500
+
+       #: single-evaluate extraction: one CDP roundtrip instead of N+2 locator calls.
+       #: Mirrors the locator semantics (visible page only, header dedupe, td rows,
+       #: trim to column count) so the fast path and the fallback agree.
+    1: _EXTRACT_ALL_SCRIPT = """(maxRows) => {
+         const visibleTables = Array.from(document.querySelectorAll(
+           '.sapMTable, .sapMListTbl, table[role="table"], .sapUiTable')).filter((t) => {
+             const page = t.closest('.sapMPage');
+             const inVisiblePage = !page || (page.getClientRects().length > 0 &&
+               getComputedStyle(page).display !== 'none' && getComputedStyle(page).visibility !== 'hidden');
+             return inVisiblePage && t.getClientRects().length > 0 &&
+               getComputedStyle(t).display !== 'none' && getComputedStyle(t).visibility !== 'hidden';
+           });
+         const readOne = (table) => {
+           const cols = [];
+           table.querySelectorAll('th, .sapMColumnHeader, [role="columnheader"]').forEach((h) => {
+             const text = (h.innerText || '').trim();
+             if (text && !cols.includes(text)) cols.push(text);
+           });
+           const rows = [];
+           const trs = table.querySelectorAll('tbody tr, [role="row"]');
+           for (const tr of trs) {
+             if (rows.length >= maxRows) break;
+             const cells = Array.from(tr.querySelectorAll('td, [role="cell"]')).map((c) => (c.innerText || '').trim());
+             if (!cells.length || !cells.some((c) => c)) continue;
+             if (cols.length) {
+               while (cells.length < cols.length) cells.push('');
+               rows.push(cells.slice(0, cols.length));
+             } else {
+               rows.push(cells);
+             }
+           }
+           return {columns: cols, rows, row_count: rows.length};
+         };
+         return visibleTables.map(readOne).filter((t) => t.columns.length || t.rows.length);
+       }"""
+
+
+    1: def _extract_via_evaluate(page: PageLike, max_rows: int) -> list[TableData] | None:
+           """Single-evaluate fast path; None when the page cannot evaluate (fakes)."""
+           evaluate = getattr(page, "evaluate", None)
+           if evaluate is None:
+               return None
+           try:
+               raw = evaluate(_EXTRACT_ALL_SCRIPT, max_rows)
+           except (PlaywrightError, AttributeError, TypeError, ValueError):
+               return None
+           if not isinstance(raw, list):
+               return None
+           tables = []
+           for entry in raw:
+               if not isinstance(entry, dict):
+                   return None
+               columns = entry.get("columns", [])
+               rows = entry.get("rows", [])
+               if not isinstance(columns, list) or not isinstance(rows, list):
+                   return None
+               tables.append(
+                   TableData(
+                       columns=[str(c) for c in columns],
+                       rows=[[str(c) for c in r] for r in rows if isinstance(r, list)],
+                       row_count=int(entry.get("row_count", len(rows))),
+                   )
+               )
+           return tables
+
+
+    1: def get_table_data(page: PageLike, timeout_ms: int = 15_000, max_rows: int = DEFAULT_MAX_ROWS) -> TableData:
+           """Read the first visible UI5 table on the page: columns are header texts,
+           rows are the text content of each data cell."""
+           try:
+               table = page.locator(TABLE_VISIBLE_SELECTOR).first
+               table.wait_for(state="visible", timeout=timeout_ms)
+           except PlaywrightTimeoutError:
+               return TableData()
+
+           fast = _extract_via_evaluate(page, max_rows)
+           if fast is not None:
+               return fast[0] if fast else TableData()
+
+           columns = []
+           for text in table.locator(COLUMN_HEADER_SELECTOR).all_inner_texts():
+               text = text.strip()
+               if text and text not in columns:
+                   columns.append(text)
+
+           # sap.m tables put headers inside tbody — only count rows that carry `td`
+           # cells, and trim each row to the detected column count so semantically
+           # empty control cells (checkbox column, ObjectStatus wrappers) cannot shift
+           # the data columns.
+           body_rows = table.locator("tbody tr:has(td), [role='row']:has([role='cell'])")
+           rows = []
+           for row in body_rows.all():
+               if len(rows) >= max_rows:
+                   break
+               # Preserve empty cells (pad/trim to column count) so a blank checkbox
+               # or status cell cannot shift the data columns left.
+               raw = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts()]
+               if not any(raw):
+                   continue
+               if columns:
+                   rows.append((raw + [""] * len(columns))[: len(columns)])
+               else:
+                   rows.append(raw)
+
+           return TableData(columns=columns, rows=rows, row_count=len(rows))
+
+
+    1: def get_all_tables(page: PageLike, timeout_ms: int = 15_000, max_rows: int = DEFAULT_MAX_ROWS) -> list[TableData]:
+           """Read ALL visible UI5 tables on the page (discovery needs every data-bearing
+           widget, not just the first). Same semantic extraction per table."""
+           locator = page.locator(TABLE_VISIBLE_SELECTOR)
+           try:
+               locator.first.wait_for(state="visible", timeout=timeout_ms)
+           except PlaywrightTimeoutError:
+               return []
+           fast = _extract_via_evaluate(page, max_rows)
+           if fast is not None:
+               return fast
+           results = []
+           for table in locator.all():
+               columns = []
+               for text in table.locator(COLUMN_HEADER_SELECTOR).all_inner_texts():
+                   text = text.strip()
+                   if text and text not in columns:
+                       columns.append(text)
+               rows = []
+               for row in table.locator("tbody tr:has(td), [role='row']:has([role='cell'])").all():
+                   if len(rows) >= max_rows:
+                       break
+                   raw = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts()]
+                   if not any(raw):
+                       continue
+                   if columns:
+                       rows.append((raw + [""] * len(columns))[: len(columns)])
+                   else:
+                       rows.append(raw)
+               if columns or rows:
+                   results.append(TableData(columns=columns, rows=rows, row_count=len(rows)))
+           return results
+
+
+    1: def suggest_semantic_selector(failed_selector: str) -> str:
+           """Rule-based fix suggestion for failed control-id selectors (AC6 demo).
+
+           Detects hardcoded UI5 control ids (`__xmlview{N}--{id}`) and proposes the
+           semantic table selector as replacement. A future LLM slot would map the
+           failure message + DOM dump to a richer suggestion; this is the rule-based
+           first step.
+           """
+           if "__xmlview" in failed_selector or "salesTable" in failed_selector:
+               return TABLE_ROLE_SELECTOR
+           return failed_selector

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fakes import ScriptedEvaluatePage
+from fakes import PageStub, ScriptedEvaluatePage
 
 from sap_agent.schemas import Severity
 from sap_agent.tools.accessibility import audit_accessibility
@@ -12,8 +12,8 @@ from sap_agent.tools.ux_critique import critique_ux
 class TestAuditAccessibility:
     def test_returns_empty_on_exception(self) -> None:
         # Force exception by making evaluate raise
-        class ErrorPage:
-            def evaluate(self, expr: str):
+        class ErrorPage(PageStub):
+            def evaluate(self, expression: str, arg=None, **kwargs):
                 raise RuntimeError("browser gone")
 
         assert audit_accessibility(ErrorPage()) == []
@@ -50,8 +50,8 @@ class TestAuditAccessibility:
 
 class TestCritiqueUx:
     def test_returns_empty_on_exception(self) -> None:
-        class ErrorPage:
-            def evaluate(self, expr: str):
+        class ErrorPage(PageStub):
+            def evaluate(self, expression: str, arg=None, **kwargs):
                 raise TimeoutError("slow")
 
         assert critique_ux(ErrorPage()) == []

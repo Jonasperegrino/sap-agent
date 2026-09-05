@@ -9,6 +9,8 @@ test file — shared primitives here, no god-fake.
 
 from __future__ import annotations
 
+from typing import Any
+
 CELL_SELECTOR = "td, [role='cell']"
 TABLE_HEADERS = ("Order ID", "Customer", "Amount", "Status", "Built")
 
@@ -19,12 +21,58 @@ DEFAULT_SALES_BODIES: dict[str, object] = {
 }
 
 
-class FakeResponse:
-    """HTTP response stub: URL + JSON body."""
+class PageStub:
+    """No-op PageLike base: inherit and override only what the test needs.
 
-    def __init__(self, url: str, body: object) -> None:
+    Signatures mirror ``PageLike`` exactly (no ``**kwargs``) so overrides
+    stay LSP-compatible. Unused members raise loudly so missing overrides
+    fail fast instead of returning None into tool logic.
+    """
+
+    url: str = ""
+    viewport_size: Any = None
+
+    def locator(self, selector: str) -> Any:
+        raise AssertionError(f"unexpected locator({selector!r})")
+
+    def get_by_text(self, text: str, *, exact: bool = False) -> Any:
+        raise AssertionError(f"unexpected get_by_text({text!r})")
+
+    def evaluate(self, expression: str, arg: Any = None) -> Any:
+        # probe-friendly default: tools use evaluate as an optional fast path
+        # (see _extract_via_evaluate) and fall back when it yields nothing.
+        return None
+
+    def goto(self, url: str, *, wait_until: Any = None, timeout: Any = None) -> Any:
+        raise AssertionError(f"unexpected goto({url!r})")
+
+    def title(self) -> str:
+        raise AssertionError("unexpected title()")
+
+    def screenshot(self, *, path: Any = None, full_page: bool | None = False) -> Any:
+        raise AssertionError("unexpected screenshot()")
+
+    def wait_for_selector(self, selector: str, *, state: Any = "attached", timeout: Any = None) -> Any:
+        # no-op default: waiting always succeeds instantly unless overridden.
+        return None
+
+    def wait_for_function(self, expression: str, *, arg: Any = None, timeout: Any = None) -> Any:
+        return None
+
+    def wait_for_url(self, url: Any, *, timeout: Any = None) -> Any:
+        return None
+
+    def wait_for_load_state(self, state: Any = None, *, timeout: Any = None) -> Any:
+        return None
+
+
+class FakeResponse:
+    """HTTP response stub: URL + JSON body + optional headers."""
+
+    def __init__(self, url: str, body: object, headers: dict | None = None) -> None:
         self._url = url
         self._body = body
+        self.headers: dict = headers or {}
 
     @property
     def url(self) -> str:
@@ -43,7 +91,9 @@ class FakeCapture:
         self._urls = urls
         self._bodies = DEFAULT_SALES_BODIES if bodies is None else bodies
 
-    def capture_response_urls(self) -> list[str]:
+    def capture_response_urls(self, url_substring: str | None = None) -> list[str]:
+        if url_substring:
+            return [u for u in self._urls if url_substring in u]
         return self._urls
 
     def response_body(self, url: str):
@@ -106,11 +156,23 @@ class FakeLocator:
             return [h + "\n" for h in TABLE_HEADERS]
         return []
 
+    def click(self, timeout: int | None = None) -> None:
+        pass
+
+    def fill(self, value: str) -> None:
+        pass
+
+    def inner_text(self) -> str:
+        return ""
+
+    def count(self) -> int:
+        return len(self._rows)
+
     def all(self):
         return FakeRowList(self._rows).all()
 
 
-class FakeTablePage:
+class FakeTablePage(PageStub):
     """Page whose any locator serves headers + the given fixture rows."""
 
     url = "http://localhost:8080/#/dashboard"
@@ -122,17 +184,17 @@ class FakeTablePage:
         return FakeLocator(selector, self._rows)
 
 
-class ScreenshotRecordingPage:
+class ScreenshotRecordingPage(PageStub):
     """Records full-page screenshots; locator() yields recording elements."""
 
     def __init__(self) -> None:
         self.screenshot_calls: list[dict] = []
         self.viewport_size = {"width": 1280, "height": 800}
 
-    def wait_for_load_state(self, state: str = "load", timeout: int | None = None) -> None:
+    def wait_for_load_state(self, state=None, timeout=None, **kwargs) -> None:
         pass
 
-    def screenshot(self, path=None, full_page: bool = False):
+    def screenshot(self, path=None, full_page: bool | None = False, **kwargs):
         self.screenshot_calls.append({"path": str(path), "full_page": full_page})
         return b"png-bytes"
 
@@ -160,7 +222,7 @@ class ScreenshotRecordingElement:
         return b"png-bytes"
 
 
-class ScriptedEvaluatePage:
+class ScriptedEvaluatePage(PageStub):
     """Returns queued evaluate() results in order; records every expression.
 
     Feeds accessibility/UX/performance audits without a browser: queue the
@@ -171,6 +233,6 @@ class ScriptedEvaluatePage:
         self._results = list(results)
         self.expressions: list[str] = []
 
-    def evaluate(self, expression: str):
+    def evaluate(self, expression: str, arg: Any = None):
         self.expressions.append(expression)
         return self._results.pop(0) if self._results else None

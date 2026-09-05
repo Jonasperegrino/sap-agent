@@ -1,0 +1,115 @@
+    1: """Bug-report drafting + failure classification (issue #648).
+
+       Reproducible artifacts (URL, page state, trace tail, screenshot, timestamp) are
+       collected on failure and rendered into a secret-free markdown bug ticket.
+       """
+
+    1: from __future__ import annotations
+
+    1: import logging
+    1: from datetime import UTC, datetime
+    1: from typing import TYPE_CHECKING
+
+    1: from ..schemas import (
+           AuthFailureKind,
+           BugReport,
+           FailureClass,
+           FailureKind,
+       )
+
+    1: if TYPE_CHECKING:
+           from pathlib import Path
+
+           from ..context import SessionContext
+           from ..protocols import PageLike
+
+    1: logger = logging.getLogger(__name__)
+
+       #: failure-kind → blame. Auth kinds map from the #645 taxonomy.
+    1: CLASSIFICATION_MATRIX: dict[str, FailureClass] = {
+    1:     FailureKind.NAV_LOOP.value: FailureClass.PRODUCT_BUG,
+    1:     FailureKind.INCONSISTENT_LOAD.value: FailureClass.PRODUCT_BUG,
+    1:     FailureKind.EMPTY_STATE.value: FailureClass.PRODUCT_BUG,
+    1:     FailureKind.BACKEND_ERROR.value: FailureClass.PRODUCT_BUG,
+    1:     FailureKind.SELECTOR_FAILURE.value: FailureClass.AGENT_LIMITATION,
+    1:     FailureKind.AGENT_LIMITATION.value: FailureClass.AGENT_LIMITATION,
+    1:     AuthFailureKind.REDIRECT_LOOP.value: FailureClass.PRODUCT_BUG,
+    1:     AuthFailureKind.TIMEOUT.value: FailureClass.AGENT_LIMITATION,
+    1:     AuthFailureKind.NETWORK_ERROR.value: FailureClass.AGENT_LIMITATION,
+    1:     AuthFailureKind.ELEMENT_NOT_FOUND.value: FailureClass.AGENT_LIMITATION,
+    1:     AuthFailureKind.BAD_CREDENTIALS.value: FailureClass.UNSUPPORTED_AUTH_FLOW,
+    1:     AuthFailureKind.SSO_UNSUPPORTED.value: FailureClass.UNSUPPORTED_AUTH_FLOW,
+       }
+
+       #: failure kinds that warrant a bounded retry (others fail fast — see auth.py)
+    2: RETRYABLE_KINDS = frozenset(
+    1:     {
+    1:         AuthFailureKind.TIMEOUT.value,
+    1:         AuthFailureKind.NETWORK_ERROR.value,
+    1:         AuthFailureKind.ELEMENT_NOT_FOUND.value,
+    1:         FailureKind.EMPTY_STATE.value,
+    1:         FailureKind.INCONSISTENT_LOAD.value,
+           }
+       )
+
+
+    1: def classify_failure(kind: str) -> FailureClass:
+           """Map a failure kind to the blame class (unknown → agent limitation)."""
+           return CLASSIFICATION_MATRIX.get(kind, FailureClass.AGENT_LIMITATION)
+
+
+    1: def should_retry(kind: str) -> bool:
+           """Retry only transient, state-free failures; nav loops and bad creds stop."""
+           return kind in RETRYABLE_KINDS
+
+
+    2: def collect_artifacts(
+           page: PageLike,
+           ctx: SessionContext,
+           *,
+    1:     screenshot_name: str = "failure.png",
+       ) -> BugReport:
+           """Capture reproducible state into a draft report (no credentials)."""
+           from ..tools.extract import get_all_tables
+
+           tables = get_all_tables(page, timeout_ms=3_000)
+           visible = [f"table[{i + 1}] columns={t.columns} rows={t.row_count}" for i, t in enumerate(tables)] or [
+               "no table rendered"
+           ]
+
+           screenshot = ctx.artifact_path(screenshot_name)
+           with screenshot.open("wb") as fh:
+               fh.write(page.screenshot())
+
+           now = datetime.now(UTC).isoformat(timespec="seconds")
+           return BugReport(
+               title=f"{ctx.config.app_url} — agent stuck",
+               expected="agent completes the step and proceeds to the next goal",
+               actual=(f"agent could not complete the step; visible state: {', '.join(visible)}"),
+               reproduction_steps=[
+                   f"run the agent against {ctx.config.app_url}",
+                   "reproduce the failing step (see trace tail)",
+                   "observe the failure classification",
+               ],
+               environment={
+                   "app_url": ctx.config.app_url,
+                   "browser": "chromium",
+                   "timestamp": now,
+                   "agent_version": "sap-poc",
+               },
+               artifacts=[str(screenshot)],
+               trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
+               secret_values=[
+                   ctx.config.username,
+                   ctx.config.password.get_secret_value() if ctx.config.password else "",
+               ],
+           )
+
+
+    1: def write_report(report: BugReport, ctx: SessionContext, *, name: str = "bug_report.md") -> Path:
+           """Persist the markdown report next to its artifacts."""
+           path = ctx.artifact_path(name)
+           report.artifacts = [str(p) for p in ctx.artifacts_dir.iterdir()]
+           path.write_text(report.to_markdown())
+           logger.info("bug report written to %s", path)
+           return path

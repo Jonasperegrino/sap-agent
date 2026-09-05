@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from fakes import FakeCapture, FakeLocator
+from fakes import FakeCapture, FakeLocator, PageStub
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, IntentConfig, QuestionIntent
@@ -27,7 +27,7 @@ ROWS: list[list[str]] = [
 
 
 @dataclasses.dataclass
-class FakePage:
+class FakePage(PageStub):
     url: str = "http://localhost:8080/#/dashboard"
     rows: list[list[str]] = dataclasses.field(default_factory=lambda: ROWS)
 
@@ -481,8 +481,10 @@ class TestLookupCustomerCreditRating:
             "http://localhost:8080",
             capture,
         )
+        assert result is not None
         assert result.intent == QuestionIntent.LOOKUP
         assert result.answer is not None
+        assert isinstance(result.answer, list)
         assert len(result.answer) == 1
         assert result.answer[0]["creditRating"] == "A"
         assert result.answer[0]["since"] == "2019-03-12"
@@ -514,6 +516,7 @@ class TestLookupCustomerCreditRating:
         capture = FakeCapture(["http://x/customers.json"], bodies={"customers.json": customers_json})
         page = FakePage(url="http://localhost:8080/#/customers")
         result = _lookup_customer("when did GlobalTech start?", intent, ctx, page, "http://localhost:8080", capture)
+        assert result is not None
         assert result.intent == QuestionIntent.LOOKUP
-        assert result.answer is not None
+        assert isinstance(result.answer, list)
         assert result.answer[0]["since"] == "2020-07-01"

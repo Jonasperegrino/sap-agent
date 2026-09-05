@@ -1,0 +1,127 @@
+    1: """Unit tests for question intent parsing (issue #647)."""
+
+    1: from __future__ import annotations
+
+    1: from sap_agent.schemas import QuestionIntent
+    1: from sap_agent.tools.reason import parse_question
+
+
+    2: class TestParseQuestion:
+    3:     def test_count_total(self) -> None:
+    1:         cfg = parse_question("how many orders are there?")
+    1:         assert cfg.intent == QuestionIntent.COUNT_TOTAL
+
+    3:     def test_count_where_year_comparer(self) -> None:
+    1:         cfg = parse_question("how many orders were built in 2026")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "built"
+    1:         assert cfg.value == "2026"
+    1:         assert cfg.comparer == "year"
+
+    3:     def test_count_where_by_status_word(self) -> None:
+    1:         cfg = parse_question("how many orders with status Approved")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "status"
+    1:         assert cfg.value == "Approved"
+    1:         assert cfg.comparer == "exact"
+
+    3:     def test_count_where_are_value(self) -> None:
+    1:         cfg = parse_question("how many orders are Approved")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "status"
+    1:         assert cfg.value == "Approved"
+    1:         assert cfg.comparer == "exact"
+
+    3:     def test_count_where_is_value(self) -> None:
+    1:         cfg = parse_question("how many orders are Cancelled")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "status"
+    1:         assert cfg.value == "Cancelled"
+    1:         assert cfg.comparer == "exact"
+
+    3:     def test_count_total_there_not_value(self) -> None:
+    1:         cfg = parse_question("how many orders are there?")
+    1:         assert cfg.intent == QuestionIntent.COUNT_TOTAL
+
+    3:     def test_existence(self) -> None:
+    1:         cfg = parse_question("is there any approved order?")
+    1:         assert cfg.intent == QuestionIntent.EXISTENCE
+    1:         assert cfg.column == "status"
+    1:         assert cfg.value == "approved"
+
+    3:     def test_existence_without_value_asks_followup(self) -> None:
+    1:         cfg = parse_question("is there any order?")
+    1:         assert cfg.intent == QuestionIntent.EXISTENCE
+    1:         assert cfg.follow_up != ""
+
+    3:     def test_lookup(self) -> None:
+    1:         cfg = parse_question("find the order for Acme Corp")
+    1:         assert cfg.intent == QuestionIntent.LOOKUP
+
+    3:     def test_count_products_total(self) -> None:
+    1:         cfg = parse_question("how many products are there?")
+    1:         assert cfg.intent == QuestionIntent.COUNT_TOTAL
+
+    3:     def test_count_products_by_category(self) -> None:
+    1:         cfg = parse_question("how many products with category Machinery")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "category"
+    1:         assert cfg.value == "Machinery"
+
+    3:     def test_count_products_in_stock_counts_all(self) -> None:
+    1:         cfg = parse_question("how many products are in stock")
+    1:         assert cfg.intent == QuestionIntent.COUNT_TOTAL
+
+    3:     def test_count_orders_for_customer_by_company_name(self) -> None:
+    1:         cfg = parse_question("how many orders for Acme Corp")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "customer"
+    1:         assert cfg.value == "Acme Corp"
+    1:         assert cfg.comparer == "exact"
+
+    3:     def test_unsupported(self) -> None:
+    1:         cfg = parse_question("play some jazz for me")
+    1:         assert cfg.intent == QuestionIntent.UNSUPPORTED
+    1:         assert cfg.follow_up != ""
+
+    3:     def test_empty_question(self) -> None:
+    1:         cfg = parse_question("   ")
+    1:         assert cfg.intent == QuestionIntent.UNSUPPORTED
+
+
+    2: class TestMultiWordValues:
+    1:     """Multi-word value extraction (#666): greedy prefix must stop at the LAST
+           separator so values never absorb a leading preposition."""
+
+    3:     def test_known_multiword_customer(self) -> None:
+    1:         cfg = parse_question("how many orders are from Nordic Supply")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "customer"
+    1:         assert cfg.value == "Nordic Supply"
+    1:         assert cfg.comparer == "exact"
+
+    3:     def test_customer_suffix_heuristic_energy(self) -> None:
+    1:         cfg = parse_question("how many orders are from Bluewave Energy")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "customer"
+    1:         assert cfg.value == "Bluewave Energy"
+
+    3:     def test_customer_suffix_heuristic_gmbh(self) -> None:
+    1:         cfg = parse_question("how many orders are for EuroParts GmbH")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "customer"
+    1:         assert cfg.value == "EuroParts GmbH"
+
+    3:     def test_value_does_not_absorb_preposition(self) -> None:
+    1:         cfg = parse_question("how many orders are from Acme Corp")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "customer"
+    1:         assert cfg.value == "Acme Corp"
+    1:         assert not cfg.value.startswith("from")
+
+    3:     def test_year_value_still_wins_over_customer_heuristic(self) -> None:
+    1:         cfg = parse_question("how many orders were built in 2026")
+    1:         assert cfg.intent == QuestionIntent.COUNT_WHERE
+    1:         assert cfg.column == "built"
+    1:         assert cfg.value == "2026"
+    1:         assert cfg.comparer == "year"

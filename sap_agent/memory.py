@@ -9,9 +9,12 @@ re-reported blindly.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .schemas import DiffIssue, DiffReport, QaReport
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 HISTORY_DIR = "history"
 

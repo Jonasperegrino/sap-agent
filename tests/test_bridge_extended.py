@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fakes import PageStub
+
 from sap_agent.ui5.bridge import fill_login_form
 
 
@@ -20,7 +22,7 @@ class FakeLocator:
         self._clicked = True
 
 
-class FakePage:
+class FakePage(PageStub):
     def __init__(self) -> None:
         self.user_loc = FakeLocator()
         self.pwd_loc = FakeLocator()

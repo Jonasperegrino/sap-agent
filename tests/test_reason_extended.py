@@ -149,3 +149,84 @@ class TestAggregateExtended:
         result = parse_question("how many products with category Machinery")
         assert result.intent == QuestionIntent.COUNT_WHERE
         assert result.column == "category"
+
+
+class TestReasonFallbacks:
+    def test_contact_who_pattern(self) -> None:
+        result = parse_question("who is the contact at Acme Corp?")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "contact"
+        assert result.value == "Acme Corp"
+
+    def test_contact_email_column(self) -> None:
+        result = parse_question("what is the email for GlobalTech?")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "email"
+
+    def test_contact_known_customer_fallback(self) -> None:
+        result = parse_question("contact Acme Corp")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "contact"
+
+    def test_contact_credit_rating_column(self) -> None:
+        result = parse_question("what is the credit rating of Acme Corp?")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "creditRating"
+
+    def test_amount_for_customer(self) -> None:
+        result = parse_question("total revenue for Acme Corp")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.aggregation == "sum"
+        assert result.column == "customer"
+
+    def test_amount_for_country(self) -> None:
+        result = parse_question("total revenue for Germany")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.column == "country"
+        assert result.value == "Germany"
+
+    def test_amount_for_industry(self) -> None:
+        result = parse_question("total revenue for automotive")
+        assert result.intent == QuestionIntent.AGGREGATE
+        assert result.column == "industry"
+
+    def test_product_price_lookup(self) -> None:
+        result = parse_question("what is the price of Industrial Pump P-200?")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "price"
+
+    def test_product_stock_lookup(self) -> None:
+        result = parse_question("stock of Hydraulic Valve HV-5?")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column == "stock"
+
+    def test_find_lookup(self) -> None:
+        result = parse_question("find revenue")
+        assert result.intent == QuestionIntent.LOOKUP
+        assert result.column is None
+
+    def test_bare_orders_by_customer(self) -> None:
+        result = parse_question("orders by Acme Corp")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "customer"
+
+    def test_bare_customers_from_country(self) -> None:
+        result = parse_question("customers from Germany")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "country"
+
+    def test_bare_customers_credit_rating(self) -> None:
+        result = parse_question("customers with credit rating A")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "creditRating"
+        assert result.value == "A"
+
+    def test_credit_rating_value(self) -> None:
+        result = parse_question("how many orders with credit rating B")
+        assert result.intent == QuestionIntent.COUNT_WHERE
+        assert result.column == "creditRating"
+
+    def test_unsupported_tail(self) -> None:
+        result = parse_question("tell me a story")
+        assert result.intent == QuestionIntent.UNSUPPORTED
+        assert result.follow_up != ""

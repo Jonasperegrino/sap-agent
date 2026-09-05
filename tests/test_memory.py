@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sap_agent.memory import AgentMemory
 from sap_agent.schemas import (
@@ -12,6 +12,9 @@ from sap_agent.schemas import (
     Severity,
     UxIssue,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _report(

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
 from sap_agent.cli import _build_parser, _resolve_config, _succeeded
 from sap_agent.schemas import StepResult, StepStatus
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestBuildParser:
@@ -90,3 +93,34 @@ class TestResolveConfig:
         args = argparse.Namespace(app_url="http://x", username="u", timeout_ms=None)
         config = _resolve_config(args)
         assert config.login_timeout_ms == 30_000
+
+    def test_interactive_username_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SAP_AGENT_USER", raising=False)
+        monkeypatch.setenv("SAP_AGENT_PASSWORD", "p")
+        monkeypatch.setattr("builtins.input", lambda _: "prompted-user")
+        import argparse
+
+        args = argparse.Namespace(app_url="http://x", username=None, timeout_ms=None)
+        config = _resolve_config(args)
+        assert config.username == "prompted-user"
+
+    def test_interactive_password_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SAP_AGENT_USER", "u")
+        monkeypatch.delenv("SAP_AGENT_PASSWORD", raising=False)
+        monkeypatch.setattr("getpass.getpass", lambda _: "prompted-pass")
+        import argparse
+
+        args = argparse.Namespace(app_url="http://x", username="u", timeout_ms=None)
+        config = _resolve_config(args)
+        assert config.password.get_secret_value() == "prompted-pass"
+
+    def test_invalid_url_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import argparse
+
+        import pytest
+
+        monkeypatch.setenv("SAP_AGENT_USER", "u")
+        monkeypatch.setenv("SAP_AGENT_PASSWORD", "p")
+        args = argparse.Namespace(app_url="not-a-url", username="u", timeout_ms=None)
+        with pytest.raises(ValueError, match="invalid app URL"):
+            _resolve_config(args)

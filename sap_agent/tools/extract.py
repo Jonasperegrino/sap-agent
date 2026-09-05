@@ -7,9 +7,13 @@ ids — this is what keeps the suite green across UI5 control-id renames (#652).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from playwright.sync_api import Page
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+if TYPE_CHECKING:
+    from ..protocols import PageLike
 
 TABLE_ROLE_SELECTOR = ".sapMTable, .sapMListTbl, table[role='table'], .sapUiTable"
 COLUMN_HEADER_SELECTOR = "th, .sapMColumnHeader, [role='columnheader']"
@@ -31,7 +35,76 @@ class TableData:
         return {"columns": self.columns, "rows": self.rows, "row_count": self.row_count}
 
 
-def get_table_data(page: Page, timeout_ms: int = 15_000) -> TableData:
+#: cap rows per table so huge tables cannot stall QA via N+1 roundtrips (perf)
+DEFAULT_MAX_ROWS = 500
+
+#: single-evaluate extraction: one CDP roundtrip instead of N+2 locator calls.
+#: Mirrors the locator semantics (visible page only, header dedupe, td rows,
+#: trim to column count) so the fast path and the fallback agree.
+_EXTRACT_ALL_SCRIPT = """(maxRows) => {
+  const visibleTables = Array.from(document.querySelectorAll(
+    '.sapMTable, .sapMListTbl, table[role="table"], .sapUiTable')).filter((t) => {
+      const page = t.closest('.sapMPage');
+      const inVisiblePage = !page || (page.getClientRects().length > 0 &&
+        getComputedStyle(page).display !== 'none' && getComputedStyle(page).visibility !== 'hidden');
+      return inVisiblePage && t.getClientRects().length > 0 &&
+        getComputedStyle(t).display !== 'none' && getComputedStyle(t).visibility !== 'hidden';
+    });
+  const readOne = (table) => {
+    const cols = [];
+    table.querySelectorAll('th, .sapMColumnHeader, [role="columnheader"]').forEach((h) => {
+      const text = (h.innerText || '').trim();
+      if (text && !cols.includes(text)) cols.push(text);
+    });
+    const rows = [];
+    const trs = table.querySelectorAll('tbody tr, [role="row"]');
+    for (const tr of trs) {
+      if (rows.length >= maxRows) break;
+      const cells = Array.from(tr.querySelectorAll('td, [role="cell"]')).map((c) => (c.innerText || '').trim());
+      if (!cells.length || !cells.some((c) => c)) continue;
+      if (cols.length) {
+        while (cells.length < cols.length) cells.push('');
+        rows.push(cells.slice(0, cols.length));
+      } else {
+        rows.push(cells);
+      }
+    }
+    return {columns: cols, rows, row_count: rows.length};
+  };
+  return visibleTables.map(readOne).filter((t) => t.columns.length || t.rows.length);
+}"""
+
+
+def _extract_via_evaluate(page: PageLike, max_rows: int) -> list[TableData] | None:
+    """Single-evaluate fast path; None when the page cannot evaluate (fakes)."""
+    evaluate = getattr(page, "evaluate", None)
+    if evaluate is None:
+        return None
+    try:
+        raw = evaluate(_EXTRACT_ALL_SCRIPT, max_rows)
+    except (PlaywrightError, AttributeError, TypeError, ValueError):
+        return None
+    if not isinstance(raw, list):
+        return None
+    tables = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return None
+        columns = entry.get("columns", [])
+        rows = entry.get("rows", [])
+        if not isinstance(columns, list) or not isinstance(rows, list):
+            return None
+        tables.append(
+            TableData(
+                columns=[str(c) for c in columns],
+                rows=[[str(c) for c in r] for r in rows if isinstance(r, list)],
+                row_count=int(entry.get("row_count", len(rows))),
+            )
+        )
+    return tables
+
+
+def get_table_data(page: PageLike, timeout_ms: int = 15_000, max_rows: int = DEFAULT_MAX_ROWS) -> TableData:
     """Read the first visible UI5 table on the page: columns are header texts,
     rows are the text content of each data cell."""
     try:
@@ -39,6 +112,10 @@ def get_table_data(page: Page, timeout_ms: int = 15_000) -> TableData:
         table.wait_for(state="visible", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         return TableData()
+
+    fast = _extract_via_evaluate(page, max_rows)
+    if fast is not None:
+        return fast[0] if fast else TableData()
 
     columns = []
     for text in table.locator(COLUMN_HEADER_SELECTOR).all_inner_texts():
@@ -53,14 +130,22 @@ def get_table_data(page: Page, timeout_ms: int = 15_000) -> TableData:
     body_rows = table.locator("tbody tr:has(td), [role='row']:has([role='cell'])")
     rows = []
     for row in body_rows.all():
-        cells = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts() if cell.strip()]
-        if cells:
-            rows.append(cells[: len(columns)] if columns else cells)
+        if len(rows) >= max_rows:
+            break
+        # Preserve empty cells (pad/trim to column count) so a blank checkbox
+        # or status cell cannot shift the data columns left.
+        raw = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts()]
+        if not any(raw):
+            continue
+        if columns:
+            rows.append((raw + [""] * len(columns))[: len(columns)])
+        else:
+            rows.append(raw)
 
     return TableData(columns=columns, rows=rows, row_count=len(rows))
 
 
-def get_all_tables(page: Page, timeout_ms: int = 15_000) -> list[TableData]:
+def get_all_tables(page: PageLike, timeout_ms: int = 15_000, max_rows: int = DEFAULT_MAX_ROWS) -> list[TableData]:
     """Read ALL visible UI5 tables on the page (discovery needs every data-bearing
     widget, not just the first). Same semantic extraction per table."""
     locator = page.locator(TABLE_VISIBLE_SELECTOR)
@@ -68,6 +153,9 @@ def get_all_tables(page: Page, timeout_ms: int = 15_000) -> list[TableData]:
         locator.first.wait_for(state="visible", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         return []
+    fast = _extract_via_evaluate(page, max_rows)
+    if fast is not None:
+        return fast
     results = []
     for table in locator.all():
         columns = []
@@ -77,9 +165,15 @@ def get_all_tables(page: Page, timeout_ms: int = 15_000) -> list[TableData]:
                 columns.append(text)
         rows = []
         for row in table.locator("tbody tr:has(td), [role='row']:has([role='cell'])").all():
-            cells = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts() if cell.strip()]
-            if cells:
-                rows.append(cells[: len(columns)] if columns else cells)
+            if len(rows) >= max_rows:
+                break
+            raw = [cell.strip() for cell in row.locator("td, [role='cell']").all_inner_texts()]
+            if not any(raw):
+                continue
+            if columns:
+                rows.append((raw + [""] * len(columns))[: len(columns)])
+            else:
+                rows.append(raw)
         if columns or rows:
             results.append(TableData(columns=columns, rows=rows, row_count=len(rows)))
     return results

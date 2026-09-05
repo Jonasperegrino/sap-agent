@@ -1,0 +1,566 @@
+    1: """Question intent mapping (issue #647): rule-based, deterministic.
+
+       Translation of free-text questions into IntentConfig so the answer tool can
+       execute a reproducible lookup. LLM slot-in for richer parsing is documented in
+       docs/architecture.md; the rule-based version covers the MVP question classes.
+       """
+
+    1: from __future__ import annotations
+
+    1: import logging
+    1: import re
+
+    1: from ..schemas import IntentConfig, QuestionIntent
+    1: from .reason_data import (
+           AGGREGATE_GROUPS,
+           CONTACT_LOOKUP_RE,
+           COUNT_TOTAL_PATTERNS,
+           COUNT_WHERE_VALUE,
+           CUSTOMER_SUFFIX_RE,
+           EXISTENCE_PATTERNS,
+           KNOWN_CITIES,
+           KNOWN_COLUMNS,
+           KNOWN_COUNTRIES,
+           KNOWN_CUSTOMERS,
+           KNOWN_INDUSTRIES,
+           KNOWN_PRODUCTS,
+           STATUS_VALUE_WORDS,
+           WHO_CONTACT_RE,
+           YEAR_ONLY,
+       )
+
+    1: logger = logging.getLogger(__name__)
+
+
+    1: def _looks_like_customer(value: str) -> bool:
+    5:     lowered = value.strip().lower()
+    5:     return lowered in KNOWN_CUSTOMERS or bool(CUSTOMER_SUFFIX_RE.search(lowered))
+
+
+    1: def _looks_like_product(value: str) -> bool:
+    1:     lowered = value.strip().lower()
+   32:     return lowered in KNOWN_PRODUCTS or any(p in lowered for p in KNOWN_PRODUCTS)
+
+
+    1: def _infer_customer_column(value: str) -> str | None:
+    5:     v = value.strip().lower()
+    5:     if v in KNOWN_COUNTRIES:
+               return "country"
+    5:     if v in KNOWN_CITIES:
+               return "city"
+    5:     if v in KNOWN_INDUSTRIES:
+               return "industry"
+    5:     if v in {"a", "b", "c"}:
+               # creditRating single letter, but avoid false positives
+               return None
+    5:     return None
+
+
+    1: def _extract_column(question: str, value: str) -> str | None:
+   15:     lowered = question.lower()
+  202:     for col in KNOWN_COLUMNS:
+  192:         if re.search(rf"\b{re.escape(col)}\b", lowered):
+    5:             return col
+           # "is there any approved order" — no column keyword, but the value word
+           # ("approved") implies the status column
+   10:     banned = {"order", "orders"}
+   69:     words = {w for w in re.findall(r"\b[a-z]+\b", lowered) if w not in banned}
+   10:     if words & set(STATUS_VALUE_WORDS):
+    3:         return "status"
+    7:     if YEAR_ONLY.match(value.strip()):
+               return "built"
+    7:     return None
+
+
+    1: def parse_question_with_llm(
+           question: str,
+           config=None,
+           ctx=None,
+       ) -> IntentConfig:
+           """Rule first, LLM fallback (openai/anthropic compatible via SAP_AGENT_LLM_API_KEY).
+
+           Keeps deterministic core — LLM only fires when rule returns UNSUPPORTED or
+           empty, and result is validated into IntentConfig. No key ever enters trace.
+           """
+           base = parse_question(question)
+           if base.intent != QuestionIntent.UNSUPPORTED:
+               return base
+           if config is None or not getattr(config, "has_llm", lambda: False)():
+               return base
+           try:
+               from .llm import call_llm_for_intent
+
+               llm_cfg = call_llm_for_intent(question, config, ctx)
+               if llm_cfg is not None and llm_cfg.intent != QuestionIntent.UNSUPPORTED:
+                   return llm_cfg
+           except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as exc:
+               logger.debug("llm fallback skipped: %s", exc)
+           return base
+
+
+    1: def _parse_contact_lookup(question: str) -> IntentConfig | None:
+   19:     lowered = question.lower()
+  342:     if not any(k in lowered for k in ("contact", "email", "phone", "city", "country", "industry", "credit", "since")):
+   19:         return None
+           # don't hijack count/aggregate questions
+           if any(p.search(lowered) for p in COUNT_TOTAL_PATTERNS):
+               return None
+           if (
+               any(k in lowered for k in ("revenue", "amount"))
+               and any(f"by {g}" in lowered for g in ("industry", "country", "city", "customer"))
+               or (
+                   ("orders by" in lowered or "order by" in lowered)
+                   and any(f"by {g}" in lowered for g in ("customer", "industry", "country", "city"))
+               )
+           ):
+               return None
+           # try WHO pattern first, then generic contact pattern
+           for pat in (WHO_CONTACT_RE, CONTACT_LOOKUP_RE):
+               m = pat.search(question.strip())
+               if m:
+                   raw_value = m.group(1).strip().strip("?.!")
+                   # strip leading determiners
+                   raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+                   if not raw_value:
+                       continue
+                   if "email" in lowered:
+                       column = "email"
+                   elif "phone" in lowered:
+                       column = "phone"
+                   elif "city" in lowered:
+                       column = "city"
+                   elif "country" in lowered:
+                       column = "country"
+                   elif "industry" in lowered:
+                       column = "industry"
+                   elif "credit" in lowered:
+                       column = "creditRating"
+                   elif "since" in lowered:
+                       column = "since"
+                   else:
+                       column = "contact"
+                   return IntentConfig(
+                       intent=QuestionIntent.LOOKUP,
+                       column=column,
+                       value=raw_value,
+                       comparer="exact",
+                   )
+           # fallback 1: known customer name appears anywhere when contact is mentioned
+           for cust in KNOWN_CUSTOMERS:
+               if cust in lowered:
+                   idx = lowered.find(cust)
+                   # preserve original casing from question if possible
+                   raw = question[idx : idx + len(cust)].strip().strip("?.!")
+                   if not raw:
+                       raw = cust
+                   # title-case for display: Acme Corp vs acme corp
+                   raw = raw.strip()
+                   if "email" in lowered:
+                       column = "email"
+                   elif "phone" in lowered:
+                       column = "phone"
+                   elif "city" in lowered:
+                       column = "city"
+                   elif "country" in lowered:
+                       column = "country"
+                   elif "industry" in lowered:
+                       column = "industry"
+                   elif "credit" in lowered:
+                       column = "creditRating"
+                   elif "since" in lowered:
+                       column = "since"
+                   else:
+                       column = "contact"
+                   return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw, comparer="exact")
+           # fallback 2: use LAST separator heuristic (same as COUNT_WHERE) when contact present
+           m = COUNT_WHERE_VALUE.search(question.strip())
+           if m:
+               raw_value = m.group(1).strip().strip("?.!")
+               raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+               if raw_value and _looks_like_customer(raw_value):
+                   if "email" in lowered:
+                       column = "email"
+                   elif "phone" in lowered:
+                       column = "phone"
+                   elif "city" in lowered:
+                       column = "city"
+                   elif "country" in lowered:
+                       column = "country"
+                   elif "industry" in lowered:
+                       column = "industry"
+                   elif "credit" in lowered:
+                       column = "creditRating"
+                   elif "since" in lowered:
+                       column = "since"
+                   else:
+                       column = "contact"
+                   return IntentConfig(intent=QuestionIntent.LOOKUP, column=column, value=raw_value, comparer="exact")
+           return None
+
+
+    1: def _parse_amount_orders(question: str) -> IntentConfig | None:
+   19:     lowered = question.lower()
+   19:     has_amount = "amount" in lowered or "revenue" in lowered
+   19:     has_orders = "orders" in lowered or "order" in lowered
+
+           # orders by customer/industry/country/city/status — count per group
+  114:     for grp in ("customer", "industry", "country", "city", "status"):
+   95:         if has_orders and (f"by {grp}" in lowered or f"per {grp}" in lowered):
+                   return IntentConfig(
+                       intent=QuestionIntent.AGGREGATE,
+                       aggregation="count",
+                       group_by=grp,
+                       limit=10,
+                   )
+           # amount/revenue by customer/industry/country/status — sum per group
+  114:     for grp in ("customer", "industry", "country", "city", "status"):
+   95:         if has_amount and (f"by {grp}" in lowered or f"per {grp}" in lowered):
+                   return IntentConfig(
+                       intent=QuestionIntent.AGGREGATE,
+                       aggregation="sum",
+                       aggregation_column="amount",
+                       group_by=grp,
+                       limit=10,
+                   )
+           # total amount for specific customer/industry/country — sum for that group
+   19:     if has_amount and ("for" in lowered or "of" in lowered):
+               # try known customer first
+               for cust in KNOWN_CUSTOMERS:
+                   if cust in lowered:
+                       idx = lowered.find(cust)
+                       raw = question[idx : idx + len(cust)].strip().strip("?.!")
+                       if not raw:
+                           raw = cust
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="customer",
+                           value=raw.strip(),
+                           comparer="exact",
+                           group_by="customer",
+                       )
+               for country in KNOWN_COUNTRIES:
+                   if country in lowered:
+                       idx = lowered.find(country)
+                       raw = question[idx : idx + len(country)].strip().strip("?.!")
+                       if not raw:
+                           raw = country
+                       # preserve original case: find with title
+                       raw = question[idx : idx + len(raw)].strip() if raw else country
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="country",
+                           value=raw.strip(),
+                           comparer="exact",
+                           group_by="country",
+                       )
+               for ind in KNOWN_INDUSTRIES:
+                   if ind in lowered:
+                       idx = lowered.find(ind)
+                       raw = question[idx : idx + len(ind)].strip().strip("?.!")
+                       if not raw:
+                           raw = ind
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="industry",
+                           value=raw.strip(),
+                           comparer="exact",
+                           group_by="industry",
+                       )
+               # fallback via LAST separator
+               m = COUNT_WHERE_VALUE.search(question.strip())
+               if m:
+                   raw_value = m.group(1).strip().strip("?.!")
+                   raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+                   if raw_value and _looks_like_customer(raw_value):
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="customer",
+                           value=raw_value,
+                           comparer="exact",
+                           group_by="customer",
+                       )
+                   # also check if raw is country/industry
+                   if raw_value.lower() in KNOWN_COUNTRIES:
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="country",
+                           value=raw_value,
+                           comparer="exact",
+                           group_by="country",
+                       )
+                   if raw_value.lower() in KNOWN_INDUSTRIES:
+                       return IntentConfig(
+                           intent=QuestionIntent.AGGREGATE,
+                           aggregation="sum",
+                           aggregation_column="amount",
+                           column="industry",
+                           value=raw_value,
+                           comparer="exact",
+                           group_by="industry",
+                       )
+   19:     return None
+
+
+    1: def _parse_avg(question: str) -> IntentConfig | None:
+   19:     lowered = question.lower()
+   19:     if "average" not in lowered and "avg" not in lowered:
+   19:         return None
+           if "price" in lowered:
+               agg_col = "price"
+           elif "stock" in lowered:
+               agg_col = "stock"
+           else:
+               agg_col = "amount"
+           group_by: str | None = None
+           for grp in AGGREGATE_GROUPS:
+               if f"by {grp}" in lowered:
+                   group_by = grp
+                   break
+           return IntentConfig(
+               intent=QuestionIntent.AGGREGATE,
+               aggregation="avg",
+               aggregation_column=agg_col,
+               group_by=group_by,
+           )
+
+
+    1: def _parse_aggregate_count_by(question: str) -> IntentConfig | None:
+   19:     lowered = question.lower()
+           # "how many customers by <group>" should route to customers page, not aggregate sales rows
+   19:     if "customers" in lowered:
+               for grp in AGGREGATE_GROUPS:
+                   if f"by {grp}" in lowered:
+                       match = COUNT_WHERE_VALUE.search(question.strip())
+                       value = match.group(1).strip() if match else grp
+                       return IntentConfig(
+                           intent=QuestionIntent.COUNT_WHERE,
+                           column=grp,
+                           value=value,
+                           comparer="exact",
+                       )
+               return None
+   70:     if not any(p.search(lowered) for p in COUNT_TOTAL_PATTERNS):
+    4:         return None
+  105:     for grp in AGGREGATE_GROUPS:
+   90:         if f"by {grp}" in lowered:
+                   return IntentConfig(
+                       intent=QuestionIntent.AGGREGATE,
+                       aggregation="count",
+                       group_by=grp,
+                       limit=10,
+                   )
+   15:     return None
+
+
+    1: def _parse_product_lookup(question: str) -> IntentConfig | None:
+   19:     lowered = question.lower()
+   19:     has_price = "price" in lowered
+   19:     has_stock = "stock" in lowered
+   19:     if not has_price and not has_stock:
+   18:         return None
+           # try known product name first
+   16:     for prod in KNOWN_PRODUCTS:
+   15:         if prod in lowered:
+                   idx = lowered.find(prod)
+                   raw = question[idx : idx + len(prod)].strip().strip("?.!")
+                   if not raw:
+                       raw = prod
+                   col = "price" if has_price else "stock"
+                   # if both, prefer which appears closer to value? keep price priority
+                   if has_price and has_stock:
+                       # decide by keyword proximity
+                       p_idx = lowered.find("price")
+                       s_idx = lowered.find("stock")
+                       # choose closer to product name position
+                       prod_idx = idx
+                       col = "price" if abs(p_idx - prod_idx) < abs(s_idx - prod_idx) else "stock"
+                   return IntentConfig(intent=QuestionIntent.LOOKUP, column=col, value=raw.strip(), comparer="exact")
+           # fallback via LAST separator
+    1:     m = COUNT_WHERE_VALUE.search(question.strip())
+    1:     if m:
+    1:         raw_value = m.group(1).strip().strip("?.!")
+    1:         raw_value = re.sub(r"^(?:our|the|my)\s+", "", raw_value, flags=re.IGNORECASE).strip()
+    1:         if raw_value and _looks_like_product(raw_value):
+                   col = "price" if has_price else "stock"
+                   return IntentConfig(intent=QuestionIntent.LOOKUP, column=col, value=raw_value, comparer="exact")
+    1:     return None
+
+
+    1: def parse_question(question: str) -> IntentConfig:
+   20:     lowered = question.lower().strip()
+   20:     if not lowered:
+    1:         return IntentConfig(intent=QuestionIntent.UNSUPPORTED, follow_up="empty question")
+
+           # customer contact lookup — must run before COUNT patterns so "who is contact at Acme Corp"
+           # doesn't fall through to unsupported
+   19:     contact_cfg = _parse_contact_lookup(question)
+   19:     if contact_cfg is not None:
+               return contact_cfg
+
+           # average / avg aggregate — must run before _parse_amount_orders so "average amount by X"
+           # returns avg instead of sum
+   19:     avg_cfg = _parse_avg(question)
+   19:     if avg_cfg is not None:
+               return avg_cfg
+
+           # "how many <noun> by <group>" → AGGREGATE count, before COUNT_TOTAL_PATTERNS hijacks
+   19:     agg_count_cfg = _parse_aggregate_count_by(question)
+   19:     if agg_count_cfg is not None:
+               return agg_count_cfg
+
+           # amount/orders by customer — deterministic aggregate without LLM
+   19:     amount_cfg = _parse_amount_orders(question)
+   19:     if amount_cfg is not None:
+               return amount_cfg
+
+   19:     product_cfg = _parse_product_lookup(question)
+   19:     if product_cfg is not None:
+               return product_cfg
+
+   70:     for pattern in EXISTENCE_PATTERNS:
+   53:         if pattern.search(lowered):
+    2:             any_match = re.search(r"\bany\s+(\w+)\s+\w+s?\b", question, flags=re.IGNORECASE)
+    2:             value = any_match.group(1) if any_match else ""
+    2:             if not value:
+    1:                 match = COUNT_WHERE_VALUE.search(question.strip())
+    1:                 value = match.group(1).strip() if match else ""
+    2:             column = _extract_column(lowered, value)
+    2:             if column:
+    2:                 return IntentConfig(
+    1:                     intent=QuestionIntent.EXISTENCE,
+    1:                     column=column,
+    1:                     value=value or None,
+    1:                     comparer="year" if YEAR_ONLY.match(value) else "exact",
+                       )
+    1:             return IntentConfig(intent=QuestionIntent.EXISTENCE, follow_up="which column to check?")
+
+   25:     for pattern in COUNT_TOTAL_PATTERNS:
+   23:         if pattern.search(lowered):
+                   # "how many orders WERE BUILT IN 2026" → COUNT_WHERE by date
+   15:             match = COUNT_WHERE_VALUE.search(question.strip())
+   15:             if match:
+   15:                 value = match.group(1).strip()
+   15:                 if value.lower() == "there":
+    3:                     return IntentConfig(intent=QuestionIntent.COUNT_TOTAL, comparer="exact")
+   12:                 column = _extract_column(lowered, value)
+   12:                 if column is None:
+    5:                     inferred = _infer_customer_column(value)
+    5:                     if inferred:
+                               column = inferred
+   12:                 if column is None and _looks_like_customer(value):
+    5:                     column = "customer"
+                       # credit rating: "credit rating A" or "A" with credit keyword
+   12:                 if column is None and "credit" in lowered:
+                           m2 = re.search(r"credit rating\s+([ABC])\b", value, re.IGNORECASE)
+                           if m2:
+                               column = "creditRating"
+                               value = m2.group(1).upper()
+                           elif value.strip().lower() in {"a", "b", "c"}:
+                               column = "creditRating"
+                           elif "credit rating" in value.lower():
+                               parts = value.strip().split()
+                               if parts and parts[-1].lower() in {"a", "b", "c"}:
+                                   column = "creditRating"
+                                   value = parts[-1].upper()
+                               else:
+                                   column = "creditRating"
+                                   # keep value as is, will be A/B/C after stripping prefix below
+                                   if value.lower().startswith("credit rating"):
+                                       value = value[len("credit rating") :].strip()
+   12:                 if column is None:
+                           # special case: how many customers from Germany → value Germany → country
+                           # already handled via _infer, else default to built for date-like
+                           inferred = _infer_customer_column(value)
+                           column = inferred if "customers" in lowered and inferred else "built"
+   12:                 if column and value.lower().startswith(column.lower()):
+    3:                     value = value[len(column) :].strip()
+   12:                 if not value:
+    1:                     return IntentConfig(intent=QuestionIntent.COUNT_TOTAL, comparer="exact")
+   22:                 return IntentConfig(
+   11:                     intent=QuestionIntent.COUNT_WHERE,
+   11:                     column=column,
+   11:                     value=value,
+   11:                     comparer="year" if YEAR_ONLY.match(value) else "exact",
+                       )
+                   return IntentConfig(intent=QuestionIntent.COUNT_TOTAL, comparer="exact")
+
+    2:     if "find" in lowered or "look up" in lowered:
+    2:         return IntentConfig(
+    1:             intent=QuestionIntent.LOOKUP,
+    1:             column=_extract_column(lowered, ""),
+    1:             follow_up="say which field to look up?",
+               )
+
+           # bare "orders by Acme Corp" without how many/number of — treat as count
+    1:     if ("orders" in lowered or "order" in lowered) and any(
+               sep in lowered for sep in (" by ", " for ", " of ", " from ")
+           ):
+               m = COUNT_WHERE_VALUE.search(question.strip())
+               if m:
+                   raw = m.group(1).strip().strip("?.!")
+                   raw = re.sub(r"^(?:our|the|my)\s+", "", raw, flags=re.IGNORECASE).strip()
+                   if raw and _looks_like_customer(raw):
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="customer", value=raw, comparer="exact")
+               for cust in KNOWN_CUSTOMERS:
+                   if cust in lowered:
+                       idx = lowered.find(cust)
+                       raw = question[idx : idx + len(cust)].strip().strip("?.!")
+                       return IntentConfig(
+                           intent=QuestionIntent.COUNT_WHERE, column="customer", value=raw or cust, comparer="exact"
+                       )
+
+           # bare "customers from Germany" without how many — treat as count
+    1:     if "customers" in lowered and any(sep in lowered for sep in (" from ", " in ", " with ", " of ", " for ", " by ")):
+               m = COUNT_WHERE_VALUE.search(question.strip())
+               if m:
+                   raw = m.group(1).strip().strip("?.!")
+                   raw = re.sub(r"^(?:our|the|my)\s+", "", raw, flags=re.IGNORECASE).strip()
+                   for col in ("industry", "country", "city", "credit rating"):
+                       if raw.lower().startswith(col):
+                           raw = raw[len(col) :].strip()
+                           break
+                   inferred = _infer_customer_column(raw)
+                   if inferred:
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=inferred, value=raw, comparer="exact")
+                   if _looks_like_customer(raw):
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="customer", value=raw, comparer="exact")
+                   if raw.lower() in {"a", "b", "c"} and "credit" in lowered:
+                       return IntentConfig(
+                           intent=QuestionIntent.COUNT_WHERE, column="creditRating", value=raw.upper(), comparer="exact"
+                       )
+                   if raw.lower() in KNOWN_COUNTRIES:
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="country", value=raw, comparer="exact")
+                   if raw.lower() in KNOWN_CITIES:
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="city", value=raw, comparer="exact")
+                   if raw.lower() in KNOWN_INDUSTRIES:
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="industry", value=raw, comparer="exact")
+               for val in KNOWN_COUNTRIES + KNOWN_CITIES + KNOWN_INDUSTRIES:
+                   if val in lowered:
+                       col = _infer_customer_column(val) or (
+                           "country" if val in KNOWN_COUNTRIES else "city" if val in KNOWN_CITIES else "industry"
+                       )
+                       idx = lowered.find(val)
+                       raw = question[idx : idx + len(val)].strip().strip("?.!")
+                       return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=col, value=raw or val, comparer="exact")
+               # credit rating bare
+               if "credit" in lowered:
+                   m2 = re.search(r"credit rating\s+([ABC])\b", lowered, re.IGNORECASE)
+                   if m2:
+                       return IntentConfig(
+                           intent=QuestionIntent.COUNT_WHERE,
+                           column="creditRating",
+                           value=m2.group(1).upper(),
+                           comparer="exact",
+                       )
+
+    1:     return IntentConfig(intent=QuestionIntent.UNSUPPORTED, follow_up="unsupported question type")

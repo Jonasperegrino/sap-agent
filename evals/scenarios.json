@@ -212,43 +212,43 @@
       "id": "ask-revenue-by-status",
       "kind": "ask",
       "args": {"question": "revenue by status"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 3, "answer_keys": ["status"]}
     },
     {
       "id": "ask-orders-by-status",
       "kind": "ask",
       "args": {"question": "orders by status"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 3, "answer_keys": ["status", "count"]}
     },
     {
       "id": "ask-products-by-category",
       "kind": "ask",
       "args": {"question": "how many products by category", "route": "catalog"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 2, "answer_keys": ["category", "count"]}
     },
     {
       "id": "ask-customers-by-country",
       "kind": "ask",
       "args": {"question": "how many customers by country"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 2, "answer_keys": ["country", "count"]}
     },
     {
       "id": "ask-average-order-value",
       "kind": "ask",
       "args": {"question": "average order value"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 1, "answer_keys": ["average"]}
     },
     {
       "id": "ask-average-amount-by-customer",
       "kind": "ask",
       "args": {"question": "average amount by customer"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 2, "answer_keys": ["customer", "average"]}
     },
     {
       "id": "ask-average-price-by-category",
       "kind": "ask",
       "args": {"question": "average price by category", "route": "catalog"},
-      "expect": {"exit": 0}
+      "expect": {"exit": 0, "intent": "aggregate", "answer_groups_min": 2, "answer_keys": ["category", "average"]}
     }
   ]
 }

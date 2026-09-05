@@ -1,0 +1,166 @@
+    1: """Shared answer-tool core (split from answer.py): snapshot, coerce, freeze.
+
+       Small pure helpers plus the table snapshot and the single network-fetch
+       helper every aggregation/lookup path funnels through.
+       """
+
+    1: from __future__ import annotations
+
+    1: import contextlib
+    1: import hashlib
+    1: import json
+    1: from dataclasses import dataclass
+    1: from typing import TYPE_CHECKING
+
+    1: from playwright.sync_api import Error as PlaywrightError
+
+    1: from ..schemas import AnsweredQuestion, IntentConfig, QuestionIntent
+    1: from .extract import TableData, get_table_data
+
+    1: if TYPE_CHECKING:
+           from ..context import SessionContext
+           from ..protocols import CaptureLike, PageLike
+
+    1: OBJECT_STATUS_NOISE = "Object Status"
+
+       # auto-route inference: which page holds the column
+    1: _CUSTOMERS_COLS = {"contact", "email", "phone", "industry", "city", "country", "creditrating", "since", "location"}
+    1: _CATALOG_COLS = {"category", "price", "stock", "unit"}
+
+
+    1: def _wait_for_table_rows(page: PageLike, timeout_ms: int = 2_000) -> None:
+           """Wait for async table rows instead of a fixed sleep (perf).
+
+           Customers/catalog tables load via fetch after nav; the old fixed 900ms
+           sleep stalled every auto-route. A row-count probe returns immediately
+           when data lands and costs nothing on fakes (suppressed).
+           """
+           with contextlib.suppress(PlaywrightError, AttributeError):
+               page.wait_for_function(
+                   """() => {
+                       const tables = Array.from(document.querySelectorAll('.sapMListTbl'))
+                           .filter((e) => e.offsetParent !== null);
+                       return tables.some((t) =>
+                           Array.from(t.querySelectorAll('tbody tr')).filter(
+                               (r) => r.querySelector('td') && (r.textContent || '').trim()
+                           ).length > 1);
+                   }""",
+                   timeout=timeout_ms,
+               )
+
+
+    1: def _infer_auto_route(intent: IntentConfig) -> str | None:
+           if intent.intent == QuestionIntent.AGGREGATE:
+               return None
+           col = (intent.column or "").lower()
+           grp = (intent.group_by or "").lower()
+           if col in _CUSTOMERS_COLS or grp in _CUSTOMERS_COLS:
+               return "customers"
+           if col in _CATALOG_COLS or grp in _CATALOG_COLS:
+               return "catalog"
+           return None
+
+
+    3: @dataclass(frozen=True)
+    2: class _TableSnapshot:
+    1:     data: TableData
+    1:     columns: dict[str, int]
+
+
+    1: def _snapshot(page: PageLike, ctx: SessionContext) -> _TableSnapshot:
+           data = get_table_data(page)
+           columns = {name: idx for idx, name in enumerate(data.columns)}
+           ctx.record(
+               "extract",
+               "table.snapshot",
+               outcome=f"columns={len(data.columns)} rows={data.row_count}",
+               url=page.url,
+           )
+           return _TableSnapshot(data=data, columns=columns)
+
+
+    1: def _normalize(cell: str) -> str:
+           """Strip UI5 ObjectStatus wrapper text so the label is comparable."""
+           if OBJECT_STATUS_NOISE in cell:
+               cell = cell.split(OBJECT_STATUS_NOISE, 1)[0]
+           return cell.strip()
+
+
+    1: def _checksum(payload: AnsweredQuestion) -> str:
+           # answer may be int or list[dict] (aggregate); serialize deterministically
+           ans = payload.answer
+           if isinstance(ans, list):
+               ans = json.dumps(ans, sort_keys=True)
+           stable = {
+               "question": payload.question,
+               "answer": ans,
+               "not_found": payload.not_found,
+               "unsupported": payload.unsupported,
+               "matched_rows": payload.evidence.matched_rows,
+               "column": payload.evidence.column,
+               "intent": payload.intent.value,
+           }
+           return hashlib.sha256(json.dumps(stable, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+    1: def _parse_amount(value: str | float | int | None) -> float:
+           if isinstance(value, (int, float)):
+               return float(value)
+           if not isinstance(value, str):
+               return 0.0
+           cleaned = value.replace("€", "").replace(",", "").strip()
+           try:
+               return float(cleaned)
+           except (ValueError, TypeError):
+               return 0.0
+
+
+    1: def _resolve_json_key(column: str | None) -> str:
+           mapping = {
+               "amount": "amountEur",
+               "customer": "customer",
+               "built": "built",
+               "status": "status",
+               "price": "price",
+               "stock": "stock",
+               "category": "category",
+               "name": "name",
+           }
+           if not column:
+               return ""
+           return mapping.get(column.lower(), column.lower())
+
+
+    1: def _matches(cell: str, value: str, comparer: str) -> bool:
+           if comparer == "year":
+               return cell[:4] == value if len(cell) >= 4 else False
+           normalized = _normalize(cell)
+           return normalized.lower() == value.lower()
+
+
+    1: def _freeze(result: AnsweredQuestion, ctx: SessionContext) -> AnsweredQuestion:
+           result.checksum = _checksum(result)
+           ctx.record("answer", result.intent.value, result.message or "answered")
+           return result
+
+
+    1: def fetch_json_body(capture: CaptureLike | None, stem: str) -> list[dict] | None:
+           """First JSON-list body for *stem* from capture: latest-first, then URL scan.
+
+           Centralizes the six copy-pasted fetch blocks: same precedence (latest
+           response first, then first matching URL), same shape guard.
+           """
+           if capture is None:
+               return None
+           with contextlib.suppress(PlaywrightError, ValueError, TypeError, AttributeError, KeyError):
+               body = capture.latest_response_body(stem)
+               if isinstance(body, list) and body and isinstance(body[0], dict):
+                   return body
+           with contextlib.suppress(PlaywrightError, ValueError, TypeError, AttributeError, KeyError):
+               for url in capture.capture_response_urls():
+                   if stem in url:
+                       with contextlib.suppress(PlaywrightError, ValueError, TypeError, AttributeError, KeyError):
+                           body = capture.response_body(url)
+                           if isinstance(body, list) and body and isinstance(body[0], dict):
+                               return body
+           return None

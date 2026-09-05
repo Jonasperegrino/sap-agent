@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fakes import ScriptedEvaluatePage
+from fakes import PageStub, ScriptedEvaluatePage
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, Severity
@@ -34,8 +34,8 @@ class TestPerformanceHints:
         assert _performance_hints(page) == []
 
     def test_exception_returns_empty(self) -> None:
-        class ErrorPage:
-            def evaluate(self, expr):
+        class ErrorPage(PageStub):
+            def evaluate(self, expression, arg=None, **kwargs):
                 raise RuntimeError("no browser")
 
         assert _performance_hints(ErrorPage()) == []
@@ -47,8 +47,8 @@ class TestTitleSize:
         assert _title_size(page) == 16.0
 
     def test_returns_zero_on_exception(self) -> None:
-        class ErrorPage:
-            def evaluate(self, expr):
+        class ErrorPage(PageStub):
+            def evaluate(self, expression, arg=None, **kwargs):
                 raise RuntimeError("x")
 
         assert _title_size(ErrorPage()) == 0.0

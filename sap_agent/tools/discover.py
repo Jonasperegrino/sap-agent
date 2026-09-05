@@ -10,14 +10,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from playwright.sync_api import Page
+from playwright.sync_api import Error as PlaywrightError
 
-from ..context import SessionContext
 from ..schemas import AppSummary, DiscoveredEntity, DiscoveredTable
-from .extract import get_all_tables
+from .extract import TableData, get_all_tables
 from .nav import go_back, navigate, open_first_row
-from .network import NetworkCapture
+
+if TYPE_CHECKING:
+    from ..context import SessionContext
+    from ..protocols import CaptureLike, PageLike
 
 #: semantic control selectors — never control ids (see D2.5)
 PAGE_TITLE_SELECTOR = ".sapMPageHeader .sapMTitle, .sapMIBar-title"
@@ -34,7 +37,7 @@ DOMAIN_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _page_title(page: Page) -> str:
+def _page_title(page: PageLike) -> str:
     candidates: list[str] = []
     for selector in PAGE_TITLE_SELECTOR.split(", "):
         locator = page.locator(selector)
@@ -49,7 +52,7 @@ def _page_title(page: Page) -> str:
     return page.title() or ""
 
 
-def _visible_texts(page: Page, selector: str) -> list[str]:
+def _visible_texts(page: PageLike, selector: str) -> list[str]:
     texts = []
     locator = page.locator(selector)
     try:
@@ -57,7 +60,7 @@ def _visible_texts(page: Page, selector: str) -> list[str]:
             txt = el.inner_text().strip()
             if txt and txt not in texts:
                 texts.append(txt)
-    except Exception:  # locator may be stale mid-navigation; discovery is best-effort
+    except (PlaywrightError, AttributeError, ValueError):  # locator stale mid-nav; best-effort
         return []
     return texts
 
@@ -87,40 +90,56 @@ class DiscoverResult:
 _WALK_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
 
 
-def _walk_tables(page: Page, app_url: str) -> tuple[list[object], list[str]]:
-    all_tables: list[object] = []
+def _walk_tables(page: PageLike, app_url: str) -> tuple[list[TableData], list[str], list[str], list[str], list[str]]:
+    all_tables: list[TableData] = []
     areas: list[str] = []
+    filters: list[str] = []
+    forms: list[str] = []
+    actions: list[str] = []
+
+    def _accumulate() -> None:
+        for txt in _visible_texts(page, FILTER_SELECTOR):
+            if txt not in filters:
+                filters.append(txt)
+        for txt in _visible_texts(page, FORM_SELECTOR):
+            if txt not in forms:
+                forms.append(txt)
+        for txt in _visible_texts(page, ACTION_SELECTOR):
+            if txt not in actions:
+                actions.append(txt)
 
     for route in _WALK_ROUTES:
         try:
             navigate(page, route, app_url)
-        except Exception:
+        except PlaywrightError:
             continue  # best-effort walk: a broken page must not kill discovery
         areas.append(route)
         all_tables.extend(get_all_tables(page))
+        _accumulate()
 
     try:
         navigate(page, "dashboard", app_url)
         open_first_row(page)
         areas.append("customer")
         all_tables.extend(get_all_tables(page))
+        _accumulate()
         go_back(page)
-    except Exception:
+    except PlaywrightError:
         pass  # no detail row present — discovery stays dashboard-level
 
-    return all_tables, areas
+    return all_tables, areas, filters, forms, actions
 
 
 def discover_app(
-    page: Page,
-    capture: NetworkCapture,
+    page: PageLike,
+    capture: CaptureLike,
     ctx: SessionContext,
     *,
     app_url: str = "",
 ) -> AppSummary:
     """Run discovery once after login: walk every area, return AppSummary."""
     title = _page_title(page)
-    tables, areas = _walk_tables(page, app_url)
+    tables, areas, filters, forms, actions = _walk_tables(page, app_url)
     endpoints = capture.capture_response_urls()
 
     discovered_tables: list[DiscoveredTable] = []
@@ -146,9 +165,17 @@ def discover_app(
                     break
         discovered_tables.append(tbl)
 
-    filters = _visible_texts(page, FILTER_SELECTOR)
-    forms = _visible_texts(page, FORM_SELECTOR)
-    actions = _visible_texts(page, ACTION_SELECTOR)
+    # Controls were already accumulated per route during the walk (union, not
+    # last-page-only); refresh on the current page in case layout changed.
+    for txt in _visible_texts(page, FILTER_SELECTOR):
+        if txt not in filters:
+            filters.append(txt)
+    for txt in _visible_texts(page, FORM_SELECTOR):
+        if txt not in forms:
+            forms.append(txt)
+    for txt in _visible_texts(page, ACTION_SELECTOR):
+        if txt not in actions:
+            actions.append(txt)
 
     entity_names: list[str] = []
     entities: list[DiscoveredEntity] = []

@@ -14,10 +14,12 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..context import SessionContext
 from ..schemas import Config, IntentConfig, QuestionIntent
+
+if TYPE_CHECKING:
+    from ..context import SessionContext
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ def _parse_llm_json(text: str) -> IntentConfig | None:
             text = text[4:].strip()
     try:
         raw = json.loads(text)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return None
     # validate intent
     intent_raw = str(raw.get("intent", "unsupported")).lower()
@@ -117,7 +119,7 @@ def _parse_llm_json(text: str) -> IntentConfig | None:
     if limit is not None:
         try:
             limit = int(limit)
-        except Exception:
+        except (ValueError, TypeError):
             limit = None
     return IntentConfig(
         intent=intent,
@@ -137,7 +139,7 @@ def call_llm_for_intent(question: str, config: Config, ctx: SessionContext | Non
     """Call LLM API to parse question. Returns IntentConfig or None on skip/fail."""
     if not config.has_llm():
         return None
-    api_key = config.llm_api_key.get_secret_value() if config.llm_api_key else ""  # type: ignore[union-attr]
+    api_key = config.llm_api_key.get_secret_value() if config.llm_api_key is not None else ""
     if not api_key:
         return None
 
@@ -182,13 +184,13 @@ def call_llm_for_intent(question: str, config: Config, ctx: SessionContext | Non
         return parsed
     except urllib.error.HTTPError as exc:
         body = ""
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(OSError, ValueError, AttributeError, TypeError):
             body = exc.read().decode()[:500]
         logger.warning("llm http %s: %s", exc.code, body[:200])
         if ctx is not None:
             ctx.record("reason", "llm.error", outcome=f"http_{exc.code}")
         return None
-    except Exception as exc:  # timeout, json error
+    except (OSError, TimeoutError, ValueError, KeyError, TypeError) as exc:  # timeout, json error
         logger.warning("llm call failed: %s", exc)
         if ctx is not None:
             ctx.record("reason", "llm.error", outcome="exception")

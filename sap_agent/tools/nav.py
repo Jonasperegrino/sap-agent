@@ -8,10 +8,14 @@ exists for a route (e.g. detail pages reached by clicking a table row).
 
 from __future__ import annotations
 
-from playwright.sync_api import Page
+from typing import TYPE_CHECKING
+
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from ..ui5.bridge import current_route
+
+if TYPE_CHECKING:
+    from ..protocols import PageLike
 
 #: top-level routes and their nav-bar button labels (NavBar.fragment.xml)
 NAV_BUTTON_TEXTS: dict[str, str] = {
@@ -35,7 +39,7 @@ PAGE_TITLES: dict[str, str] = {
 VISIBLE_PAGE_TITLE = ".sapMPage:visible .sapMTitle"
 
 
-def navigate(page: Page, route: str, app_url: str, timeout_ms: int = 10_000) -> str:
+def navigate(page: PageLike, route: str, app_url: str, timeout_ms: int = 10_000) -> str:
     """Navigate to a top-level route (menu button first, hash goto fallback).
 
     Returns the resulting hash route. Raises PlaywrightTimeoutError when the
@@ -60,7 +64,7 @@ def navigate(page: Page, route: str, app_url: str, timeout_ms: int = 10_000) -> 
     return current_route(page) or expected
 
 
-def _wait_for_route_and_title(page: Page, expected: str, title: str | None, timeout_ms: int) -> None:
+def _wait_for_route_and_title(page: PageLike, expected: str, title: str | None, timeout_ms: int) -> None:
     """Combined wait: URL changed to expected route AND visible title appeared.
 
     Replaces the former sequential wait_for_url + _wait_for_page_title +
@@ -93,7 +97,7 @@ def _wait_for_route_and_title(page: Page, expected: str, title: str | None, time
         _wait_for_view_settle(page, timeout_ms)
 
 
-def _wait_for_view_settle(page: Page, timeout_ms: int) -> None:
+def _wait_for_view_settle(page: PageLike, timeout_ms: int) -> None:
     """Wait until the view swap finished (≤1 visible table in the DOM).
 
     During the UI5 page transition the incoming and the outgoing view are both
@@ -105,7 +109,7 @@ def _wait_for_view_settle(page: Page, timeout_ms: int) -> None:
     )
 
 
-def _wait_for_page_title(page: Page, title: str, timeout_ms: int) -> None:
+def _wait_for_page_title(page: PageLike, title: str, timeout_ms: int) -> None:
     """Wait until the *visible* page header shows the expected title.
 
     UI5 keeps every visited view in the DOM (navbar pre-renders them all),
@@ -129,7 +133,7 @@ def _wait_for_page_title(page: Page, title: str, timeout_ms: int) -> None:
         raise PlaywrightTimeoutError(f"page title '{title}' did not appear within {timeout_ms} ms") from exc
 
 
-def open_first_row(page: Page, timeout_ms: int = 10_000) -> str:
+def open_first_row(page: PageLike, timeout_ms: int = 10_000) -> str:
     """Open the first row of the visible table → customer detail route.
 
     UI5 1.151 does not route synthetic DOM mouse events to list-item `press`
@@ -142,7 +146,7 @@ def open_first_row(page: Page, timeout_ms: int = 10_000) -> str:
     return current_route(page) or "#/customer/?"
 
 
-def _press_first_visible_row(page: Page) -> bool:
+def _press_first_visible_row(page: PageLike) -> bool:
     """Fire `press` on the first item of the visible sap.m.List table."""
     return bool(
         page.evaluate(
@@ -164,7 +168,7 @@ def _press_first_visible_row(page: Page) -> bool:
     )
 
 
-def go_back(page: Page, expected_route: str = "#/dashboard", timeout_ms: int = 10_000) -> str:
+def go_back(page: PageLike, expected_route: str = "#/dashboard", timeout_ms: int = 10_000) -> str:
     """Click the Back button and wait for the expected route."""
     page.locator("button:has-text('Back')").first.click(timeout=timeout_ms)
     title = PAGE_TITLES.get(expected_route.lstrip("#/"))

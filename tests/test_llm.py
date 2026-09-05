@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from http.client import HTTPMessage
 from unittest.mock import MagicMock, patch
 
 from pydantic import SecretStr
@@ -192,7 +193,9 @@ class TestCallLlmForIntent:
 
     @patch("sap_agent.tools.llm._post_json")
     def test_http_error_returns_none(self, mock_post: MagicMock) -> None:
-        mock_post.side_effect = urllib.error.HTTPError(url="http://x", code=429, msg="rate limited", hdrs=None, fp=None)
+        mock_post.side_effect = urllib.error.HTTPError(
+            url="http://x", code=429, msg="rate limited", hdrs=HTTPMessage(), fp=None
+        )
         cfg = self._config()
         ctx = SessionContext(Config(app_url="http://x", username="u", password="p"))
         result = call_llm_for_intent("q", cfg, ctx)

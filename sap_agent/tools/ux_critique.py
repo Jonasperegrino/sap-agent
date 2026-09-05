@@ -9,11 +9,19 @@ orchestrator (`tools/qa.py`), which can compare pages.
 
 from __future__ import annotations
 
-from playwright.sync_api import Page
+from typing import TYPE_CHECKING
+
+from playwright.sync_api import Error as PlaywrightError
 
 from ..schemas import Severity, UxIssue
 
+if TYPE_CHECKING:
+    from ..protocols import PageLike
+
 _VISIBLE_PAGE = ".sapMPage:visible"
+
+#: bound per-page findings so huge DOMs cannot stall QA (perf)
+MAX_UX_ISSUES = 100
 
 _CRITIQUE_SCRIPT = """
 () => {
@@ -51,7 +59,10 @@ _CRITIQUE_SCRIPT = """
   }
 
   const rowsByTop = new Map();
-  page.querySelectorAll('.sapMTitle, .sapMText, .sapMObjectTitle, label, td').forEach((el) => {
+  const alignEls = Array.from(
+    page.querySelectorAll('.sapMTitle, .sapMText, .sapMObjectTitle, label, td')).slice(0, 300);
+  alignEls.forEach((el) => {
+    if (issues.length >= 200) return;
     if (!visible(el) || !el.textContent.trim()) return;
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
@@ -111,14 +122,16 @@ _CRITIQUE_SCRIPT = """
 """
 
 
-def critique_ux(page: Page) -> list[UxIssue]:
+def critique_ux(page: PageLike, max_issues: int = MAX_UX_ISSUES) -> list[UxIssue]:
     """Run the visual critique against the visible UI5 page."""
     try:
         raw = page.evaluate(_CRITIQUE_SCRIPT)
-    except Exception:
+    except (PlaywrightError, RuntimeError, OSError, ValueError, TypeError, AttributeError):
         return []
     issues = []
     for entry in raw or []:
+        if len(issues) >= max_issues:
+            break
         issues.append(
             UxIssue(
                 type=str(entry.get("type", "unknown")),

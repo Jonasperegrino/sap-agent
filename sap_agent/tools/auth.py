@@ -14,15 +14,18 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from ..context import SessionContext
 from ..schemas import AuthFailureKind, AuthResult, Config
 from ..ui5 import bridge
+
+if TYPE_CHECKING:
+    from ..context import SessionContext
+    from ..protocols import PageLike
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +71,7 @@ def classify_error(error: BaseException, page_has_credentials_hint: bool = False
     return AuthFailureKind.ELEMENT_NOT_FOUND
 
 
-def _login_outcome(page: Page, success_hash: str, timeout_ms: int = 10_000) -> tuple[str, str]:
+def _login_outcome(page: PageLike, success_hash: str, timeout_ms: int = 10_000) -> tuple[str, str]:
     """Determine post-submit outcome.
 
     1. Probe the bad-creds toast first (appears fast, auto-dismisses).
@@ -89,7 +92,7 @@ def _login_outcome(page: Page, success_hash: str, timeout_ms: int = 10_000) -> t
         return ("timeout", "")
 
 
-def login(page: Page, config: Config, ctx: SessionContext) -> AuthResult:
+def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
     """Log into the Fiori app with bounded retries.
 
     Raises AuthError with a typed, sanitized result when login cannot succeed.
@@ -105,7 +108,7 @@ def login(page: Page, config: Config, ctx: SessionContext) -> AuthResult:
             page.goto(config.app_url, wait_until="domcontentloaded", timeout=config.login_timeout_ms)
             bridge.wait_for_ui5_ready(page, config.login_timeout_ms)
 
-            if not bridge.has_login_form(page, timeout_ms=10_000):
+            if not bridge.has_login_form(page, timeout_ms=config.login_timeout_ms):
                 # No plain form: could already be on a shell (session reused) or SSO boundary.
                 route = bridge.current_route(page)
                 if config.success_route and route and route.startswith(config.success_route):
@@ -121,11 +124,15 @@ def login(page: Page, config: Config, ctx: SessionContext) -> AuthResult:
                     )
                 )
 
-            bridge.fill_login_form(page, config.username, config.password.get_secret_value())
+            bridge.fill_login_form(
+                page, config.username, config.password.get_secret_value(), timeout_ms=config.login_timeout_ms
+            )
             ctx.record("auth", "login.submitted", "credentials submitted")
 
             outcome, detail = _login_outcome(
-                page, success_hash=config.success_route or "#/dashboard", timeout_ms=10_000
+                page,
+                success_hash=config.success_route or "#/dashboard",
+                timeout_ms=config.login_timeout_ms,
             )
             if outcome == "bad_credentials":
                 result = AuthResult(
@@ -135,7 +142,7 @@ def login(page: Page, config: Config, ctx: SessionContext) -> AuthResult:
                     detail=detail or "credentials rejected by the app",
                     attempts=attempts,
                 )
-                ctx.record("auth", "login.failed", result.kind.value, url=page.url)
+                ctx.record("auth", "login.failed", result.kind_value(), url=page.url)
                 raise AuthError(result)
 
             landing_route = bridge.current_route(page)
@@ -175,12 +182,12 @@ def login(page: Page, config: Config, ctx: SessionContext) -> AuthResult:
 
         except AuthError as exc:
             if not exc.result.transient:
-                ctx.record("auth", "login.failed", exc.result.kind.value, url=page.url)
+                ctx.record("auth", "login.failed", exc.result.kind_value(), url=page.url)
                 raise exc
             ctx.record(
                 "auth",
                 "login.retry",
-                f"transient {exc.result.kind.value}",
+                f"transient {exc.result.kind_value()}",
                 url=page.url,
             )
             delay = _backoff_delay(config.retry_backoff_s, attempts)

@@ -8,11 +8,20 @@ order, form-label association, and a basic text/background contrast ratio.
 
 from __future__ import annotations
 
-from playwright.sync_api import Page
+from typing import TYPE_CHECKING
+
+from playwright.sync_api import Error as PlaywrightError
 
 from ..schemas import AccessibilityIssue, Severity
 
+if TYPE_CHECKING:
+    from ..protocols import PageLike
+
 _VISIBLE_PAGE = ".sapMPage:visible"
+
+#: bound per-page findings so huge DOMs cannot stall QA (perf); JS also
+#: early-exits, python slices as a second guard for hand-fed evaluate fakes.
+MAX_AUDIT_ISSUES = 100
 
 _AUDIT_SCRIPT = """
 () => {
@@ -96,7 +105,9 @@ _AUDIT_SCRIPT = """
   }
 
   const bodyBg = getComputedStyle(document.body).backgroundColor;
-  page.querySelectorAll('p, span, label, td, div, h1, h2, h3, h4').forEach((el) => {
+  const textEls = Array.from(page.querySelectorAll('p, span, label, td, div, h1, h2, h3, h4')).slice(0, 300);
+  textEls.forEach((el) => {
+    if (issues.length >= 200) return;
     if (!visible(el) || !el.textContent.trim()) return;
     const st = getComputedStyle(el);
     const fg = st.color;
@@ -125,14 +136,16 @@ _AUDIT_SCRIPT = """
 """
 
 
-def audit_accessibility(page: Page) -> list[AccessibilityIssue]:
+def audit_accessibility(page: PageLike, max_issues: int = MAX_AUDIT_ISSUES) -> list[AccessibilityIssue]:
     """Run the accessibility audit against the visible UI5 page."""
     try:
         raw = page.evaluate(_AUDIT_SCRIPT)
-    except Exception:
+    except (PlaywrightError, RuntimeError, OSError, ValueError, TypeError, AttributeError):
         return []
     issues = []
     for entry in raw or []:
+        if len(issues) >= max_issues:
+            break
         issues.append(
             AccessibilityIssue(
                 type=str(entry.get("type", "unknown")),

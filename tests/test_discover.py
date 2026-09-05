@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
-from fakes import FakeCapture
+from fakes import FakeCapture, PageStub
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from sap_agent.context import SessionContext
@@ -53,7 +54,7 @@ class PassLocator(FakeLocator):
 
 
 @dataclasses.dataclass
-class FakePage:
+class FakePage(PageStub):
     title_text: str = "Sales Dashboard"
     table_locator: object = None
     page_title: str = "SAP Fiori PoC"
@@ -62,19 +63,19 @@ class FakePage:
     def title(self) -> str:
         return self.page_title
 
-    def wait_for_url(self, url: object, timeout: int = 10_000) -> None:
+    def wait_for_url(self, url: object, timeout: int = 10_000, **kwargs) -> None:
         pass
 
-    def wait_for_function(self, expression: str, arg=None, timeout: int = 10_000) -> None:
+    def wait_for_function(self, expression: str, arg=None, timeout=10_000, **kwargs) -> None:
         pass
 
-    def evaluate(self, expression: str) -> bool:
+    def evaluate(self, expression: str, arg=None, **kwargs) -> bool:
         return True
 
-    def get_by_text(self, text: str, exact: bool = False) -> PassLocator:
+    def get_by_text(self, text: str, exact: bool = False, **kwargs) -> PassLocator:
         return PassLocator([text])
 
-    def locator(self, selector: str) -> FakeLocator:
+    def locator(self, selector: str) -> Any:
         if selector in (".sapMIBar-title", ".sapMTitle"):
             return FakeLocator([self.title_text])
         if selector == VISIBLE_PAGE_TITLE:

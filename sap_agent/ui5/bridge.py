@@ -7,8 +7,12 @@ plain login form; production variants are layered on top in tools/auth.py.
 
 from __future__ import annotations
 
-from playwright.sync_api import Page
+from typing import TYPE_CHECKING
+
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+if TYPE_CHECKING:
+    from ..protocols import PageLike
 
 LOGIN_USER_SELECTOR = 'input[placeholder="Username"]'
 LOGIN_PASSWORD_SELECTOR = 'input[placeholder="Password"]'
@@ -16,11 +20,11 @@ LOGIN_SUBMIT_SELECTOR = 'button:has-text("Log In")'
 WELCOME_HEADER_SELECTOR = ".sapMObjectHeaderTitle, .sapMOHTitle"
 
 
-def wait_for_ui5_ready(page: Page, timeout_ms: int = 30_000) -> None:
+def wait_for_ui5_ready(page: PageLike, timeout_ms: int = 30_000) -> None:
     page.wait_for_selector(".sapUiBody", state="attached", timeout=timeout_ms)
 
 
-def current_route(page: Page) -> str | None:
+def current_route(page: PageLike) -> str | None:
     """Return the UI5 hash route (e.g. '#/dashboard') or None."""
     url = page.url
     if "#" in url:
@@ -28,7 +32,7 @@ def current_route(page: Page) -> str | None:
     return None
 
 
-def has_login_form(page: Page, timeout_ms: int = 5_000) -> bool:
+def has_login_form(page: PageLike, timeout_ms: int = 5_000) -> bool:
     try:
         page.wait_for_selector(LOGIN_USER_SELECTOR, state="attached", timeout=timeout_ms)
         return True
@@ -36,7 +40,7 @@ def has_login_form(page: Page, timeout_ms: int = 5_000) -> bool:
         return False
 
 
-def fill_login_form(page: Page, username: str, password: str, timeout_ms: int = 10_000) -> None:
+def fill_login_form(page: PageLike, username: str, password: str, timeout_ms: int = 10_000) -> None:
     user = page.locator(LOGIN_USER_SELECTOR)
     pwd = page.locator(LOGIN_PASSWORD_SELECTOR)
     btn = page.locator(LOGIN_SUBMIT_SELECTOR)
@@ -48,7 +52,7 @@ def fill_login_form(page: Page, username: str, password: str, timeout_ms: int = 
     btn.click()
 
 
-def welcome_text(page: Page, timeout_ms: int = 10_000) -> str | None:
+def welcome_text(page: PageLike, timeout_ms: int = 10_000) -> str | None:
     try:
         el = page.locator(WELCOME_HEADER_SELECTOR).first
         el.wait_for(state="visible", timeout=timeout_ms)

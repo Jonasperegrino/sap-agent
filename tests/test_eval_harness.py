@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evals.run_eval import (  # noqa: E402
+from evals.run_eval import (
     build_env,
     load_scenarios,
     retries_from_stderr,

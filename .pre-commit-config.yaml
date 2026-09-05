@@ -24,22 +24,12 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # ty strict — 133 diags currently, keep manual until cleaned. Run: uv run ty check
-  # uncomment to enforce in pre-commit:
-  # - repo: local
-  #   hooks:
-  #     - id: ty-check
-  #       name: ty check
-  #       entry: uv run ty check
-  #       language: system
-  #       types: [python]
-  #       pass_filenames: false
+  # ty clean — enforced on every commit. Run: uv run ty check
   - repo: local
     hooks:
-      - id: ty-check-manual
-        name: ty check (manual)
+      - id: ty-check
+        name: ty check
         entry: uv run ty check
         language: system
         types: [python]
         pass_filenames: false
-        stages: [manual]

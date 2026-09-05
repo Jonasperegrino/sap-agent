@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from fakes import FakeResponse, FakeTablePage
+from typing import TYPE_CHECKING, Any
+
+from fakes import FakeResponse, FakeTablePage, PageStub
 
 from sap_agent.tools.extract import TableData, get_table_data
 from sap_agent.tools.network import NetworkCapture
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 FIXTURE = [
     {"id": "SO-1001", "customer": "Acme Corp", "amount": "€12,450.00", "status": "Approved"},
@@ -13,19 +18,20 @@ FIXTURE = [
 ]
 
 
-class EmittingPage:
+class EmittingPage(PageStub):
     """Network-fake page: registers the response handler, replays canned responses."""
 
     def __init__(self, responses: list[tuple[str, object]]) -> None:
-        self._handler = None
+        self._handler: Callable[..., Any] | None = None
         self._responses = responses
 
-    def on(self, event: str, handler) -> None:
+    def on(self, event: str, f: Callable[..., None]) -> None:
         if event != "response":
             raise AssertionError(f"unexpected event {event}")
-        self._handler = handler
+        self._handler = f
 
     def emit(self) -> None:
+        assert self._handler is not None, "no response handler registered"
         for url, body in self._responses:
             self._handler(FakeResponse(url, body))
 
@@ -70,6 +76,7 @@ class TestNetworkCaptureUnit:
 
         page = EmittingPage([])  # emit manually below
         capture = NetworkCapture(page, "http://localhost:8080")
+        assert page._handler is not None  # type: ignore[attr-defined]
         page._handler(NonJsonResponse("http://localhost:8080/plain.txt", "text"))  # type: ignore[attr-defined]
         assert capture.capture_response_urls() == ["http://localhost:8080/plain.txt"]
         assert capture.latest_response_body("plain.txt") is None
@@ -85,7 +92,7 @@ class TestTableExtractionUnit:
     def test_empty_page_returns_empty_table(self) -> None:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-        class NotFoundPage:
+        class NotFoundPage(PageStub):
             def locator(self, selector):
                 class NotFound:
                     @property

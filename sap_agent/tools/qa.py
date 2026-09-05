@@ -9,24 +9,29 @@ and rolled into a single QaReport.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from datetime import UTC, datetime
 from statistics import median
+from typing import TYPE_CHECKING
 
-from playwright.sync_api import Page
+from playwright.sync_api import Error as PlaywrightError
 
-from ..context import SessionContext
 from ..schemas import QaPageReport, QaReport, Severity, UxIssue
+from ..ui5.bridge import current_route
 from .accessibility import audit_accessibility
 from .nav import go_back, navigate, open_first_row
-from .network import NetworkCapture
 from .screenshot import capture_page
 from .ux_critique import critique_ux
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..context import SessionContext
+    from ..protocols import CaptureLike, PageLike
 
 QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
 
 
-def _performance_hints(page: Page) -> list[str]:
+def _performance_hints(page: PageLike) -> list[str]:
     hints: list[str] = []
     try:
         timings = page.evaluate(
@@ -40,7 +45,7 @@ def _performance_hints(page: Page) -> list[str]:
                 };
             }"""
         )
-    except Exception:
+    except (PlaywrightError, RuntimeError, OSError, ValueError, TypeError, AttributeError):
         return hints
     if timings.get("count", 0) > 40:
         hints.append(f"high resource count: {timings['count']} requests on this page")
@@ -59,9 +64,11 @@ def _align_severities(report: QaPageReport) -> None:
         issue.severity = classify_issue(issue.type)
 
 
-def _audit_page(page: Page, route: str, ctx: SessionContext, capture: NetworkCapture) -> QaPageReport:
+def _audit_page(page: PageLike, route: str, ctx: SessionContext, _capture: CaptureLike) -> QaPageReport:
     navigate(page, route, ctx.config.app_url, timeout_ms=ctx.config.nav_timeout_ms)
-    screenshots = [capture_page(page, route, ctx)]
+    # Viewport-only screenshots: full-page stitching is 2-4x slower and 5-10x
+    # larger per route; element-level detail stays available via capture_element.
+    screenshots = [capture_page(page, route, ctx, full_page=False)]
     a11y = audit_accessibility(page)
     ux = critique_ux(page)
     hints = _performance_hints(page)
@@ -80,7 +87,7 @@ def _audit_page(page: Page, route: str, ctx: SessionContext, capture: NetworkCap
     )
 
 
-def _title_size(page: Page) -> float:
+def _title_size(page: PageLike) -> float:
     try:
         return float(
             page.evaluate(
@@ -95,7 +102,7 @@ def _title_size(page: Page) -> float:
             )
             or 0
         )
-    except Exception:
+    except (PlaywrightError, RuntimeError, OSError, ValueError, TypeError, AttributeError):
         return 0.0
 
 
@@ -123,8 +130,8 @@ def _consistency_check(sizes: dict[str, float]) -> dict[str, list[UxIssue]]:
 
 
 def run_qa(
-    page: Page,
-    capture: NetworkCapture,
+    page: PageLike,
+    capture: CaptureLike,
     ctx: SessionContext,
     *,
     app_url: str = "",
@@ -134,7 +141,7 @@ def run_qa(
     """Audit every route; returns the assembled QaReport."""
     title_sizes: dict[str, float] = {}
     pages: list[QaPageReport] = []
-    steps_total = len(QA_ROUTES) + 1  # 3 routes + customer drill-down
+    steps_total = len(QA_ROUTES) + 1  # 4 routes + customer drill-down
 
     for index, route in enumerate(QA_ROUTES):
         if progress:
@@ -144,13 +151,15 @@ def run_qa(
         pages.append(report)
 
     try:
-        navigate(page, "orders", ctx.config.app_url, timeout_ms=ctx.config.nav_timeout_ms)
+        # orders was just audited above — skip the redundant re-navigate (perf)
+        if current_route(page) != "#/orders":
+            navigate(page, "orders", ctx.config.app_url, timeout_ms=ctx.config.nav_timeout_ms)
         if progress:
             progress(step_offset + len(QA_ROUTES) + 1, step_offset + steps_total, "customer")
         open_first_row(page, timeout_ms=ctx.config.nav_timeout_ms)
         report = QaPageReport(
             route="customer",
-            screenshots=[capture_page(page, "customer", ctx)],
+            screenshots=[capture_page(page, "customer", ctx, full_page=False)],
             accessibility_issues=audit_accessibility(page),
             ux_issues=critique_ux(page),
             performance_hints=_performance_hints(page),
@@ -158,8 +167,8 @@ def run_qa(
         title_sizes["customer"] = _title_size(page)
         pages.append(report)
         go_back(page, timeout_ms=ctx.config.nav_timeout_ms)
-    except Exception:
-        pass  # no detail row — skip customer page
+    except (PlaywrightError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        ctx.record("qa", "audit.customer", f"skipped: {type(exc).__name__}")  # no detail row
 
     consistency = _consistency_check(dict(title_sizes))
     for report in pages:

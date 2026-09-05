@@ -1,0 +1,233 @@
+    1: """Aggregation answers (split from answer.py): sum/avg/count grouped + ranked.
+
+       Prefers captured network JSON (precise numerics); falls back to the rendered
+       table snapshot. Customer-group joins resolve via customers.json.
+       """
+
+    1: from __future__ import annotations
+
+    1: from typing import TYPE_CHECKING
+
+    1: from ..schemas import AnsweredQuestion, AnswerEvidence, IntentConfig, QuestionIntent
+    1: from .answer_core import _matches, _normalize, _parse_amount, _resolve_json_key, _TableSnapshot, fetch_json_body
+
+    1: if TYPE_CHECKING:
+           from ..protocols import CaptureLike
+
+
+    1: def _customer_join(capture: CaptureLike | None, filename: str, group_key: str) -> tuple[dict[str, str], dict[str, str]]:
+           """Map customer id/name → group value from a captured JSON file."""
+           by_id: dict[str, str] = {}
+           by_name: dict[str, str] = {}
+           body = fetch_json_body(capture, filename)
+           if body:
+               for c in body:
+                   by_id[str(c.get("id", ""))] = str(c.get(group_key, "")).strip()
+                   by_name[str(c.get("name", "")).lower()] = str(c.get(group_key, "")).strip()
+           return by_id, by_name
+
+
+    4: def _aggregate_top(
+           question: str,
+           intent: IntentConfig,
+           *,
+           source: str,
+           endpoint: str | None,
+    1:     snapshot: _TableSnapshot | None = None,
+    1:     network_rows: list[dict] | None = None,
+    1:     capture: CaptureLike | None = None,
+       ) -> AnsweredQuestion | None:
+           """Handle AGGREGATE: sum/avg/count grouped + ranked. Prefers network_rows (precise numeric)."""
+           agg_col = _resolve_json_key(intent.aggregation_column or intent.column or "amount")
+           group_key = _resolve_json_key(intent.group_by or "customer")
+           is_count = intent.aggregation == "count"
+           # count doesn't need agg_col, sum/avg do
+           if not group_key or (not is_count and not agg_col):
+               return AnsweredQuestion(
+                   question=question,
+                   intent=QuestionIntent.AGGREGATE,
+                   unsupported=True,
+                   message="aggregate needs aggregation_column and group_by",
+                   follow_up="e.g. sum amount grouped by customer",
+               )
+           limit = intent.limit or 3
+           # source rows
+           rows: list[dict] = []
+           if network_rows is not None:
+               rows = network_rows
+           elif snapshot is not None:
+               # fallback: build dicts from table snapshot using column names
+               col_map = {name.lower(): idx for idx, name in enumerate(snapshot.data.columns)}
+               agg_idx = col_map.get((intent.aggregation_column or "amount").lower())
+               grp_idx = col_map.get((intent.group_by or "customer").lower())
+               filter_idx = col_map.get(intent.column.lower()) if intent.column else None
+               for r in snapshot.data.rows:
+                   if filter_idx is not None and intent.value:
+                       cell = r[filter_idx] if filter_idx < len(r) else ""
+                       if not _matches(cell, intent.value, intent.comparer):
+                           continue
+                   grp = r[grp_idx] if grp_idx is not None and grp_idx < len(r) else ""
+                   amt_raw = r[agg_idx] if agg_idx is not None and agg_idx < len(r) else "0"
+                   grp = _normalize(grp)
+                   rows.append(
+                       {
+                           group_key: grp,
+                           agg_col: _parse_amount(amt_raw),
+                           "built": r[filter_idx] if filter_idx is not None else "",
+                       }
+                   )
+               # rows already filtered, no second pass
+               filtered = rows
+               # join handling for industry/country/city — map customer name → group value via customers.json
+               join_by_name: dict[str, str] = {}
+               if group_key in ("industry", "city", "country"):
+                   _, join_by_name = _customer_join(capture, "customers.json", group_key)
+               # group
+               is_avg = intent.aggregation == "avg"
+               totals: dict[str, float] = {}
+               avg_sums: dict[str, float] = {}
+               avg_counts: dict[str, int] = {}
+               if is_avg and intent.group_by is None:
+                   vals = [float(rec.get(agg_col, 0) or 0) for rec in filtered]
+                   avg = round(sum(vals) / len(vals), 2) if vals else 0.0
+                   answer = [{"average": avg}]
+               else:
+                   for rec in filtered:
+                       if group_key in ("industry", "city", "country") and join_by_name:
+                           cust_name = str(rec.get("customer", rec.get("Customer", ""))).lower()
+                           if not cust_name:
+                               cust_name = str(rec.get(group_key, "")).lower()
+                           g = join_by_name.get(cust_name, "").strip()
+                           if not g:
+                               continue
+                       else:
+                           g = str(rec.get(group_key, "")).strip()
+                       if not g:
+                           continue
+                       if is_count:
+                           totals[g] = totals.get(g, 0.0) + 1
+                       elif is_avg:
+                           avg_sums[g] = avg_sums.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
+                           avg_counts[g] = avg_counts.get(g, 0) + 1
+                       else:
+                           totals[g] = totals.get(g, 0.0) + float(rec.get(agg_col, 0) or 0)
+                   if is_avg:
+                       key_name = "customer" if group_key == "customer" else group_key
+                       avg_by_key = {k: round(avg_sums[k] / avg_counts[k], 2) for k in avg_sums}
+                       ranked = sorted(avg_by_key.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                       answer = [{key_name: k, "average": v} for k, v in ranked]
+                   else:
+                       ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                       if is_count:
+                           key_name = "customer" if group_key == "customer" else group_key
+                           answer = [{key_name: k, "count": int(v)} for k, v in ranked]
+                       else:
+                           key_name = "customer" if group_key == "customer" else group_key
+                           answer = [{key_name: k, "revenue": round(v, 2), "amount": round(v, 2)} for k, v in ranked]
+               if not answer:
+                   return AnsweredQuestion(
+                       question=question,
+                       intent=QuestionIntent.AGGREGATE,
+                       not_found=True,
+                       message="no rows for aggregate filter",
+                       evidence=AnswerEvidence(source=source, column=intent.column or "", matched_rows=0, endpoint=endpoint),
+                       confidence="high",
+                   )
+               return AnsweredQuestion(
+                   question=question,
+                   intent=QuestionIntent.AGGREGATE,
+                   answer=answer,
+                   evidence=AnswerEvidence(
+                       source=source, column=intent.column or "", matched_rows=len(filtered), endpoint=endpoint
+                   ),
+                   confidence="medium",
+               )
+           else:
+               return None
+
+           # network path: filter + group (join for country/industry/city filter)
+           # build filter join map if needed (sales.customerId → customers.country)
+           filter_join_by_id: dict[str, str] = {}
+           filter_join_by_name: dict[str, str] = {}
+           if intent.column and intent.column.lower() in ("industry", "city", "country"):
+               filter_join_by_id, filter_join_by_name = _customer_join(capture, "customers.json", intent.column.lower())
+           filtered = []
+           for rec in rows:
+               if intent.column and intent.value:
+                   col_low = intent.column.lower()
+                   if col_low in ("industry", "city", "country") and (filter_join_by_id or filter_join_by_name):
+                       cid = str(rec.get("customerId", "")).strip()
+                       cname = str(rec.get("customer", "")).lower().strip()
+                       cell = filter_join_by_id.get(cid, "") or filter_join_by_name.get(cname, "")
+                       if not _matches(cell, intent.value, intent.comparer) and intent.value.lower() not in cell.lower():
+                           continue
+                       # matched
+                   else:
+                       cell = str(rec.get(_resolve_json_key(intent.column), ""))
+                       if not _matches(cell, intent.value, intent.comparer):
+                           continue
+               filtered.append(rec)
+           # join map for industry/city/country via customers.json (sales.customerId → customers.industry)
+           join_by_id: dict[str, str] = {}
+           join_by_name: dict[str, str] = {}
+           if group_key in ("industry", "city", "country"):
+               join_by_id, join_by_name = _customer_join(capture, "customers.json", group_key)
+           is_avg = intent.aggregation == "avg"
+           totals: dict[str, float] = {}
+           avg_sums: dict[str, float] = {}
+           avg_counts: dict[str, int] = {}
+           if is_avg and intent.group_by is None:
+               vals = [float(rec.get(agg_col, rec.get("amount", 0)) or 0) for rec in filtered]
+               avg = round(sum(vals) / len(vals), 2) if vals else 0.0
+               answer = [{"average": avg}]
+           else:
+               for rec in filtered:
+                   if group_key in ("industry", "city", "country") and (join_by_id or join_by_name):
+                       cid = str(rec.get("customerId", "")).strip()
+                       cname = str(rec.get("customer", "")).lower().strip()
+                       g = join_by_id.get(cid, "") or join_by_name.get(cname, "")
+                       g = g.strip()
+                       if not g:
+                           continue
+                   else:
+                       g = str(rec.get(group_key, "")).strip()
+                   if not g:
+                       continue
+                   if is_count:
+                       totals[g] = totals.get(g, 0.0) + 1
+                   elif is_avg:
+                       avg_sums[g] = avg_sums.get(g, 0.0) + float(rec.get(agg_col, rec.get("amount", 0)))
+                       avg_counts[g] = avg_counts.get(g, 0) + 1
+                   else:
+                       val = _parse_amount(rec.get(agg_col, rec.get("amount", 0)))
+                       totals[g] = totals.get(g, 0.0) + val
+               if is_avg:
+                   key_name = "customer" if group_key == "customer" else group_key
+                   avg_by_key = {k: round(avg_sums[k] / avg_counts[k], 2) for k in avg_sums}
+                   ranked = sorted(avg_by_key.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                   answer = [{key_name: k, "average": v} for k, v in ranked]
+               else:
+                   ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=intent.sort_order != "asc")[:limit]
+                   key_name = "customer" if group_key == "customer" else group_key
+                   if is_count:
+                       answer = [{key_name: k, "count": int(v)} for k, v in ranked]
+                   else:
+                       answer = [{key_name: k, "revenue": round(v, 2)} for k, v in ranked]
+           if not answer:
+               return AnsweredQuestion(
+                   question=question,
+                   intent=QuestionIntent.AGGREGATE,
+                   not_found=True,
+                   message="no rows for aggregate filter",
+                   evidence=AnswerEvidence(source=source, column=intent.column or "", matched_rows=0, endpoint=endpoint),
+                   confidence="high",
+               )
+           return AnsweredQuestion(
+               question=question,
+               intent=QuestionIntent.AGGREGATE,
+               answer=answer,
+               evidence=AnswerEvidence(
+                   source=source, column=intent.column or "", matched_rows=len(filtered), endpoint=endpoint
+               ),
+               confidence="high",
+           )

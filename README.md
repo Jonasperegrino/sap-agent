@@ -37,7 +37,7 @@ Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secur
 ## Evaluation & quality gates
 
 ```sh
-make test    # pytest + 80% coverage gate (193 tests)
+make test    # pytest + 80% coverage gate (390 tests)
 make lint    # ruff
 make check   # lint + test
 make eval    # 19 deterministic scenarios (defaults to live app; SAP_AGENT_URL=http://localhost:8080 for local)
@@ -51,12 +51,14 @@ Each `make eval` run persists `artifacts/eval_runs/<ts>.json` + `history.md` tre
 ```
 agent/
   sap_agent/
-    cli.py        # entry points
+    cli.py        # parser + config + main (handlers in cli_commands)
+    cli_commands.py  # one function per subcommand
+    cli_runner.py # browser session lifecycle + shared login logs
     controller.py # agent loop: budgets, stuck detection, planner mode
-    context.py / schemas.py / memory.py
+    context.py / schemas.py / memory.py / protocols.py
     ui5/          # UI5 bridge (page.evaluate)
-    tools/        # auth, nav, extract, network, reason, answer, discover, qa, …
-    ui/           # terminal.py + streamlit_app.py
+    tools/        # auth, nav, extract, network, reason (+reason_data), answer (+core/aggregate/lookup), discover, qa, …
+    ui/           # terminal.py + streamlit_app.py + service.py
   streamlit_app.py  # root shim -> sap_agent/ui/streamlit_app.py
   .streamlit/config.toml
   tests/          # behavioral unit + integration (needs fiori-app + chromium)

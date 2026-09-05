@@ -7,133 +7,29 @@ docs/architecture.md; the rule-based version covers the MVP question classes.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from ..schemas import IntentConfig, QuestionIntent
-
-#: known filterable columns across all pages (dashboard + catalog + history);
-#: "order"/"product" are intentionally absent — entity words, not data columns
-KNOWN_COLUMNS: tuple[str, ...] = (
-    "status",
-    "customer",
-    "amount",
-    "built",
-    "price",
-    "stock",
-    "category",
-    "unit",
-    "quantity",
-    "qty",
-    "name",
-    "contact",
-    "email",
-    "phone",
-    "industry",
-    "city",
-    "country",
+from .reason_data import (
+    AGGREGATE_GROUPS,
+    CONTACT_LOOKUP_RE,
+    COUNT_TOTAL_PATTERNS,
+    COUNT_WHERE_VALUE,
+    CUSTOMER_SUFFIX_RE,
+    EXISTENCE_PATTERNS,
+    KNOWN_CITIES,
+    KNOWN_COLUMNS,
+    KNOWN_COUNTRIES,
+    KNOWN_CUSTOMERS,
+    KNOWN_INDUSTRIES,
+    KNOWN_PRODUCTS,
+    STATUS_VALUE_WORDS,
+    WHO_CONTACT_RE,
+    YEAR_ONLY,
 )
 
-#: contact lookup triggers — "who is contact at Acme Corp?"
-CONTACT_LOOKUP_RE = re.compile(
-    r"(?:contact|email|phone).*?(?:at|for|of)\s+([A-Za-z0-9][\w\s\.\-]*?)\s*[?.!]?$",
-    re.IGNORECASE,
-)
-WHO_CONTACT_RE = re.compile(
-    r"who.*?(?:contact|email|phone).*?(?:at|for|of)\s+([A-Za-z0-9][\w\s\.\-]*?)\s*[?.!]?$",
-    re.IGNORECASE,
-)
-
-#: value words that imply the status column (order statuses on the PoC)
-STATUS_VALUE_WORDS: tuple[str, ...] = ("approved", "pending", "shipped", "rejected", "cancelled")
-
-COUNT_TOTAL_PATTERNS = (
-    re.compile(r"how many (?:orders?|rows?|entries|sales orders?|records|products?|customers?|items?)\b"),
-    re.compile(r"\btotal (?:orders?|rows?|entries|products?|customers?|items?)\b"),
-    re.compile(r"count (?:of )?(?:orders?|rows?|entries|products?|customers?|items?)\b"),
-    re.compile(r"number of (?:orders?|rows?|entries|sales orders?|records|products?|customers?|items?)\b"),
-)
-
-EXISTENCE_PATTERNS = (
-    re.compile(r"\bis there (?:any|an|a)\b"),
-    re.compile(r"\bdoes (?:any|the)\b.*\bexist\b"),
-    re.compile(r"\bare there (?:any|orders)\b"),
-)
-
-# greedy prefix forces the LAST separator occurrence so values never absorb a
-# leading preposition ("are in stock" must yield "stock", not "in stock")
-COUNT_WHERE_VALUE = re.compile(r".*\b(?:with|where|for|by|built in|in|from|are|is)\s+([\w€. ,-]+?)\s*[?.!]?$")
-YEAR_ONLY = re.compile(r"^(19|20)\d{2}$")
-
-#: value shapes that imply the customer column (company-name heuristics)
-CUSTOMER_SUFFIX_RE = re.compile(
-    r"\b(corp|gmbh|ltd|llc|supply|trading|energy|industries|logistics|parts|technologies?)$"
-)
-KNOWN_CUSTOMERS: tuple[str, ...] = (
-    "acme corp",
-    "globaltech",
-    "europarts",
-    "nordic supply",
-    "iberia trading",
-    "atlas industries",
-    "eastline logistics",
-    "bluewave energy",
-    "helios manufacturing",
-    "quantum robotics",
-)
-
-KNOWN_COUNTRIES: tuple[str, ...] = (
-    "germany",
-    "france",
-    "norway",
-    "spain",
-    "switzerland",
-    "poland",
-    "ireland",
-    "netherlands",
-)
-
-KNOWN_CITIES: tuple[str, ...] = (
-    "berlin",
-    "munich",
-    "paris",
-    "oslo",
-    "madrid",
-    "zurich",
-    "warsaw",
-    "dublin",
-    "valencia",
-    "eindhoven",
-)
-
-KNOWN_INDUSTRIES: tuple[str, ...] = (
-    "manufacturing",
-    "information technology",
-    "automotive",
-    "logistics",
-    "wholesale trade",
-    "industrial machinery",
-    "transportation",
-    "energy",
-    "robotics",
-)
-
-KNOWN_PRODUCTS: tuple[str, ...] = (
-    "industrial pump p-200",
-    "hydraulic valve hv-5",
-    "servo motor sm-90",
-    "plc controller plc-x1",
-    "thermal sensor ts-100",
-    "data logger dl-4",
-    "lubricant oil 20l",
-    "filter cartridge fc-7",
-    "conveyor belt cb-30",
-    "maintenance service day",
-    "calibration service",
-    "edge gateway eg-2",
-    "safety gloves size l",
-    "vibration sensor vs-3",
-    "training workshop day",
-)
+logger = logging.getLogger(__name__)
 
 
 def _looks_like_customer(value: str) -> bool:
@@ -197,8 +93,8 @@ def parse_question_with_llm(
         llm_cfg = call_llm_for_intent(question, config, ctx)
         if llm_cfg is not None and llm_cfg.intent != QuestionIntent.UNSUPPORTED:
             return llm_cfg
-    except Exception:
-        pass
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as exc:
+        logger.debug("llm fallback skipped: %s", exc)
     return base
 
 
@@ -216,7 +112,7 @@ def _parse_contact_lookup(question: str) -> IntentConfig | None:
             ("orders by" in lowered or "order by" in lowered)
             and any(f"by {g}" in lowered for g in ("customer", "industry", "country", "city"))
         )
-    ):  # noqa: E501, SIM102
+    ):
         return None
     # try WHO pattern first, then generic contact pattern
     for pat in (WHO_CONTACT_RE, CONTACT_LOOKUP_RE):
@@ -415,9 +311,6 @@ def _parse_amount_orders(question: str) -> IntentConfig | None:
     return None
 
 
-AGGREGATE_GROUPS = ("customer", "industry", "country", "city", "status", "category")
-
-
 def _parse_avg(question: str) -> IntentConfig | None:
     lowered = question.lower()
     if "average" not in lowered and "avg" not in lowered:
@@ -587,10 +480,8 @@ def parse_question(question: str) -> IntentConfig:
                 if column is None:
                     # special case: how many customers from Germany → value Germany → country
                     # already handled via _infer, else default to built for date-like
-                    if "customers" in lowered and _infer_customer_column(value):
-                        column = _infer_customer_column(value)  # type: ignore[assignment]
-                    else:
-                        column = "built"
+                    inferred = _infer_customer_column(value)
+                    column = inferred if "customers" in lowered and inferred else "built"
                 if column and value.lower().startswith(column.lower()):
                     value = value[len(column) :].strip()
                 if not value:
@@ -646,7 +537,7 @@ def parse_question(question: str) -> IntentConfig:
             if raw.lower() in {"a", "b", "c"} and "credit" in lowered:
                 return IntentConfig(
                     intent=QuestionIntent.COUNT_WHERE, column="creditRating", value=raw.upper(), comparer="exact"
-                )  # noqa: E501
+                )
             if raw.lower() in KNOWN_COUNTRIES:
                 return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column="country", value=raw, comparer="exact")
             if raw.lower() in KNOWN_CITIES:
@@ -657,7 +548,7 @@ def parse_question(question: str) -> IntentConfig:
             if val in lowered:
                 col = _infer_customer_column(val) or (
                     "country" if val in KNOWN_COUNTRIES else "city" if val in KNOWN_CITIES else "industry"
-                )  # noqa: E501
+                )
                 idx = lowered.find(val)
                 raw = question[idx : idx + len(val)].strip().strip("?.!")
                 return IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=col, value=raw or val, comparer="exact")
@@ -670,6 +561,6 @@ def parse_question(question: str) -> IntentConfig:
                     column="creditRating",
                     value=m2.group(1).upper(),
                     comparer="exact",
-                )  # noqa: E501
+                )
 
     return IntentConfig(intent=QuestionIntent.UNSUPPORTED, follow_up="unsupported question type")

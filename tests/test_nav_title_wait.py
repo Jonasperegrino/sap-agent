@@ -8,17 +8,18 @@ original-style message on timeout.
 from __future__ import annotations
 
 import pytest
+from fakes import PageStub
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from sap_agent.tools.nav import _wait_for_page_title
 
 
-class RecordingPage:
+class RecordingPage(PageStub):
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.calls: list[dict] = []
 
-    def wait_for_function(self, expression: str, *, arg=None, timeout=None):
+    def wait_for_function(self, expression: str, arg=None, timeout=None):
         self.calls.append({"expression": expression, "arg": arg, "timeout": timeout})
         if self.fail:
             raise PlaywrightTimeoutError("Timeout 5000ms exceeded")

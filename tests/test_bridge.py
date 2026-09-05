@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+from fakes import PageStub
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from sap_agent.ui5.bridge import current_route, has_login_form, wait_for_ui5_ready, welcome_text
 
 
-class FakePage:
+class FakePage(PageStub):
     def __init__(self, url: str = "http://localhost:8080/#/dashboard") -> None:
         self.url = url
         self._fail_selectors: set[str] = set()
         self._wait_for_calls: list[dict] = []
 
-    def wait_for_selector(self, selector: str, state: str = "attached", timeout: int = 30_000) -> None:
+    def wait_for_selector(self, selector: str, *, state="attached", timeout=30_000, **kwargs) -> None:
         self._wait_for_calls.append({"selector": selector, "state": state, "timeout": timeout})
         if selector in self._fail_selectors:
             raise PlaywrightTimeoutError(f"Selector {selector} not found")

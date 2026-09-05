@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fakes import PageStub
 from playwright.sync_api import Error as PlaywrightError
 
 from sap_agent.context import SessionContext
@@ -10,7 +11,7 @@ from sap_agent.tools.auth import AuthError
 from sap_agent.tools.report import should_retry
 
 
-class FakePage:
+class FakePage(PageStub):
     def __init__(self) -> None:
         self.url = "http://localhost:8080/#/dashboard"
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from fakes import FakeLocator
+from fakes import FakeLocator, PageStub
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config
@@ -19,7 +19,7 @@ ROWS: list[list[str]] = [
 
 
 @dataclasses.dataclass
-class FakePage:
+class FakePage(PageStub):
     url: str = "http://localhost:8080/#/dashboard"
     rows: list[list[str]] = dataclasses.field(default_factory=lambda: ROWS)
 

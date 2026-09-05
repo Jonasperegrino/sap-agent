@@ -43,6 +43,10 @@ class AuthResult(BaseModel):
     def transient(self) -> bool:
         return self.kind in TRANSIENT_FAILURES
 
+    def kind_value(self) -> str:
+        """Failure-kind string; 'unknown' when unset (success results)."""
+        return self.kind.value if self.kind is not None else "unknown"
+
     def sanitized(self) -> dict[str, Any]:
         """Serializable form guaranteed free of credentials."""
         return self.model_dump()
@@ -422,21 +426,45 @@ class Config(BaseModel):
     def from_env(cls, **overrides: Any) -> Config:
         import os
 
+        def _int(name: str) -> int | None:
+            raw = os.environ.get(name)
+            if not raw:
+                return None
+            try:
+                return int(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+        def _float(name: str) -> float | None:
+            raw = os.environ.get(name)
+            if not raw:
+                return None
+            try:
+                return float(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+
         env: dict[str, Any] = {
-            "app_url": os.environ.get("SAP_AGENT_URL", "https://jonasperegrino.github.io/sap-fiori/"),
+            "app_url": os.environ.get("SAP_AGENT_URL")
+            or os.environ.get("SAP_AGENT_APP_URL", "https://jonasperegrino.github.io/sap-fiori/"),
             "username": os.environ.get("SAP_AGENT_USER", ""),
             "password": SecretStr(os.environ.get("SAP_AGENT_PASSWORD", "")),
             "log_level": os.environ.get("SAP_AGENT_LOG_LEVEL", "INFO"),
+            "headless": os.environ.get("SAP_AGENT_HEADLESS", "true").lower() not in {"0", "false", "no"},
+            "artifacts_dir": os.environ.get("SAP_AGENT_ARTIFACTS_DIR", "artifacts"),
+            "success_route": os.environ.get("SAP_AGENT_SUCCESS_ROUTE"),
         }
-        raw_backoff = os.environ.get("SAP_AGENT_RETRY_BACKOFF_S")
-        if raw_backoff:
-            env["retry_backoff_s"] = float(raw_backoff)
-        raw_nav_timeout = os.environ.get("SAP_AGENT_NAV_TIMEOUT_MS")
-        if raw_nav_timeout:
-            env["nav_timeout_ms"] = int(raw_nav_timeout)
-        raw_extract_timeout = os.environ.get("SAP_AGENT_EXTRACT_TIMEOUT_MS")
-        if raw_extract_timeout:
-            env["extract_timeout_ms"] = int(raw_extract_timeout)
+        for field, name, parse in (
+            ("login_timeout_ms", "SAP_AGENT_LOGIN_TIMEOUT_MS", _int),
+            ("retry_budget", "SAP_AGENT_RETRY_BUDGET", _int),
+            ("retry_backoff_s", "SAP_AGENT_RETRY_BACKOFF_S", _float),
+            ("nav_timeout_ms", "SAP_AGENT_NAV_TIMEOUT_MS", _int),
+            ("extract_timeout_ms", "SAP_AGENT_EXTRACT_TIMEOUT_MS", _int),
+            ("llm_timeout_s", "SAP_AGENT_LLM_TIMEOUT_S", _float),
+        ):
+            value = parse(name)
+            if value is not None:
+                env[field] = value
         # LLM env (optional, no hard dependency)
         raw_llm_key = os.environ.get("SAP_AGENT_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if raw_llm_key:
@@ -450,9 +478,6 @@ class Config(BaseModel):
         raw_llm_provider = os.environ.get("SAP_AGENT_LLM_PROVIDER")
         if raw_llm_provider:
             env["llm_provider"] = raw_llm_provider
-        raw_llm_timeout = os.environ.get("SAP_AGENT_LLM_TIMEOUT_S")
-        if raw_llm_timeout:
-            env["llm_timeout_s"] = float(raw_llm_timeout)
         env.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**env)
 
