@@ -35,9 +35,6 @@ PAGE_TITLES: dict[str, str] = {
     "customer": "Customer Details",
 }
 
-#: UI5 page title inside the *visible* page (stale views stay in the DOM hidden)
-VISIBLE_PAGE_TITLE = ".sapMPage:visible .sapMTitle"
-
 
 def navigate(page: PageLike, route: str, app_url: str, timeout_ms: int = 10_000) -> str:
     """Navigate to a top-level route (menu button first, hash goto fallback).
@@ -60,16 +57,20 @@ def navigate(page: PageLike, route: str, app_url: str, timeout_ms: int = 10_000)
         page.goto(app_url + expected, wait_until="domcontentloaded", timeout=timeout_ms)
 
     title = PAGE_TITLES.get(route)
-    _wait_for_route_and_title(page, expected, title, timeout_ms)
+    try:
+        _wait_for_route_and_title(page, expected, title, timeout_ms)
+    except PlaywrightTimeoutError:
+        # menu click landed nowhere (stale shell, missed tap) — one hash-goto retry
+        # before giving up, so a single flaky click can't kill discovery/QA.
+        if current_route(page) == expected:
+            raise
+        page.goto(app_url + expected, wait_until="domcontentloaded", timeout=timeout_ms)
+        _wait_for_route_and_title(page, expected, title, timeout_ms)
     return current_route(page) or expected
 
 
 def _wait_for_route_and_title(page: PageLike, expected: str, title: str | None, timeout_ms: int) -> None:
-    """Combined wait: URL changed to expected route AND visible title appeared.
-
-    Replaces the former sequential wait_for_url + _wait_for_page_title +
-    _wait_for_view_settle, saving ~1s per navigation call.
-    """
+    """Combined wait: URL changed to expected route AND visible title appeared."""
     if title is not None:
         expression = """([expected, title]) => {
             const urlOk = window.location.hash.includes(expected);
@@ -107,30 +108,6 @@ def _wait_for_view_settle(page: PageLike, timeout_ms: int) -> None:
         "() => Array.from(document.querySelectorAll('.sapMListTbl')).filter(e => e.offsetParent !== null).length <= 1",
         timeout=timeout_ms,
     )
-
-
-def _wait_for_page_title(page: PageLike, title: str, timeout_ms: int) -> None:
-    """Wait until the *visible* page header shows the expected title.
-
-    UI5 keeps every visited view in the DOM (navbar pre-renders them all),
-    hiding inactive ones — a plain ``get_by_text`` match can hit a stale view,
-    and navbar button labels match the target title verbatim.
-    """
-    expression = """(expected) => {
-        const titles = Array.from(document.querySelectorAll('.sapMPage .sapMTitle'))
-            .filter(
-                (t) =>
-                    t.getClientRects().length > 0 &&
-                    getComputedStyle(t).display !== 'none' &&
-                    getComputedStyle(t).visibility !== 'hidden'
-            )
-            .map((t) => t.textContent || '');
-        return titles.some((text) => text.includes(expected));
-    }"""
-    try:
-        page.wait_for_function(expression, arg=title, timeout=timeout_ms)
-    except PlaywrightTimeoutError as exc:
-        raise PlaywrightTimeoutError(f"page title '{title}' did not appear within {timeout_ms} ms") from exc
 
 
 def open_first_row(page: PageLike, timeout_ms: int = 10_000) -> str:

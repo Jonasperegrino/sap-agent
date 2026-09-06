@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from ..browser import launch_args
+from ..browser import launch_args, try_install_chromium
 from ..context import SessionContext
 from ..tools.answer import evaluate_question
 from ..tools.auth import AuthError, login
@@ -36,11 +36,6 @@ class RunResult:
     error: str = ""
 
 
-def _launch_args() -> dict:
-    """Chromium args for Streamlit Cloud / sandboxed envs (see browser.launch_args)."""
-    return launch_args()
-
-
 def run_question(config: Config, question: str, route: str | None = None) -> RunResult:
     """Answer a question and automatically draft a report when the run fails."""
     logger.info("agent question (route=%s): %s", route, question)
@@ -48,7 +43,7 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
 
     def _run_once() -> RunResult:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=config.headless, **_launch_args())
+            browser = pw.chromium.launch(headless=config.headless, **launch_args())
             page = browser.new_page()
             capture = NetworkCapture(page, config.app_url)
             try:
@@ -82,22 +77,12 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
     except (PlaywrightError, OSError, TimeoutError) as exc:
         msg = str(exc)
         if "Executable doesn't exist" in msg or "playwright install" in msg:
-            import subprocess as _sp
-
             logger.warning("browser missing, attempting playwright install: %s", msg[:200])
-            for _cmd in (
-                ["playwright", "install", "chromium"],
-                ["playwright", "install", "chromium-headless-shell"],
-                ["python", "-m", "playwright", "install", "chromium"],
-            ):
-                try:
-                    _sp.run(_cmd, check=False, timeout=180)
-                except (OSError, _sp.SubprocessError):
-                    continue
-                try:
-                    return _run_once()
-                except (PlaywrightError, OSError, TimeoutError):
-                    continue
+            try_install_chromium()
+            try:
+                return _run_once()
+            except (PlaywrightError, OSError, TimeoutError):
+                pass
         # fallback — browser never started, no screenshot possible
         from sap_agent.schemas import BugReport
 

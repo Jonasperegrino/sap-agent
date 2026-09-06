@@ -17,8 +17,6 @@ from ..schemas import AccessibilityIssue, Severity
 if TYPE_CHECKING:
     from ..protocols import PageLike
 
-_VISIBLE_PAGE = ".sapMPage:visible"
-
 #: bound per-page findings so huge DOMs cannot stall QA (perf); JS also
 #: early-exits, python slices as a second guard for hand-fed evaluate fakes.
 MAX_AUDIT_ISSUES = 100

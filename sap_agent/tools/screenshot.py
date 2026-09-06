@@ -8,7 +8,6 @@ QA report can reference them without re-reading the browser.
 from __future__ import annotations
 
 import contextlib
-import itertools
 from datetime import UTC, datetime
 from re import sub as re_sub
 from typing import TYPE_CHECKING
@@ -25,9 +24,6 @@ if TYPE_CHECKING:
 
 SCREENSHOT_DIR = "screenshots"
 
-#: monotonic suffix so same-second captures across QA routes never collide (#perf)
-_stamp_counter = itertools.count()
-
 
 def _slug(value: str) -> str:
     return re_sub(r"[^A-Za-z0-9_-]+", "_", value.strip().strip("/")).strip("_")
@@ -35,7 +31,7 @@ def _slug(value: str) -> str:
 
 def _stamp(route: str) -> str:
     ms = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")[:-3]
-    return f"{ms}_{next(_stamp_counter):02d}_{_slug(route)}"
+    return f"{ms}_{_slug(route)}"
 
 
 def _settle(page: PageLike, timeout_ms: int) -> None:
@@ -70,25 +66,6 @@ def capture_page(
         width=viewport["width"],
         height=viewport["height"],
         captured_at=datetime.now(UTC).isoformat(timespec="seconds"),
-    )
-
-
-def capture_element(
-    page: PageLike, selector: str, route: str, ctx: SessionContext, *, timeout_ms: int = 10_000
-) -> ScreenshotResult:
-    """Screenshot of the first matching element; returns its metadata."""
-    element = page.locator(selector).first
-    element.wait_for(state="visible", timeout=timeout_ms)
-    box = element.bounding_box() or {"width": 0, "height": 0}
-    path = _file_path(ctx, f"element_{_stamp(route)}_{_slug(selector)}.png")
-    element.screenshot(path=str(path))
-    return ScreenshotResult(
-        route=route,
-        path=str(path),
-        width=int(box["width"]),
-        height=int(box["height"]),
-        captured_at=datetime.now(UTC).isoformat(timespec="seconds"),
-        element=selector,
     )
 
 

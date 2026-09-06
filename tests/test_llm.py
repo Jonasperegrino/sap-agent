@@ -14,7 +14,6 @@ from sap_agent.schemas import Config, QuestionIntent
 from sap_agent.tools.llm import (
     _extract_content,
     _parse_llm_json,
-    _payload_anthropic,
     _payload_openai,
     call_llm_for_intent,
 )
@@ -32,39 +31,17 @@ class TestPayloadOpenAI:
         assert payload["messages"][1]["content"] == "how many orders?"
 
 
-class TestPayloadAnthropic:
-    def test_returns_correct_structure(self) -> None:
-        payload = _payload_anthropic("count approved", "claude-3")
-        assert payload["model"] == "claude-3"
-        assert payload["temperature"] == 0
-        assert payload["max_tokens"] == 512
-        assert payload["system"] != ""
-        assert len(payload["messages"]) == 1
-        assert payload["messages"][0]["content"] == "count approved"
-
-
 class TestExtractContent:
     def test_openai_extracts_message_content(self) -> None:
         resp = {"choices": [{"message": {"content": '{"intent":"count_total"}'}}]}
-        assert _extract_content("openai", resp) == '{"intent":"count_total"}'
+        assert _extract_content(resp) == '{"intent":"count_total"}'
 
     def test_openai_empty_choices(self) -> None:
-        assert _extract_content("openai", {}) == ""
-        assert _extract_content("openai", {"choices": []}) == ""
+        assert _extract_content({}) == ""
+        assert _extract_content({"choices": []}) == ""
 
     def test_openai_missing_content(self) -> None:
-        assert _extract_content("openai", {"choices": [{"message": {}}]}) == ""
-
-    def test_anthropic_extracts_text_block(self) -> None:
-        resp = {"content": [{"type": "text", "text": '{"intent":"count_where"}'}]}
-        assert _extract_content("anthropic", resp) == '{"intent":"count_where"}'
-
-    def test_anthropic_no_text_block(self) -> None:
-        resp = {"content": [{"type": "image", "source": "x"}]}
-        assert _extract_content("anthropic", resp) == ""
-
-    def test_anthropic_empty_content(self) -> None:
-        assert _extract_content("anthropic", {}) == ""
+        assert _extract_content({"choices": [{"message": {}}]}) == ""
 
 
 class TestParseLlmJson:
@@ -145,13 +122,12 @@ class TestParseLlmJson:
 
 
 class TestCallLlmForIntent:
-    def _config(self, key: str = "test-key", provider: str = "openai") -> Config:
+    def _config(self, key: str = "test-key") -> Config:
         return Config(
             app_url="http://x",
             username="u",
             password="p",
             llm_api_key=SecretStr(key),
-            llm_provider=provider,
         )
 
     def test_no_llm_key_returns_none(self) -> None:
@@ -174,16 +150,6 @@ class TestCallLlmForIntent:
         result = call_llm_for_intent("how many orders?", cfg)
         assert result is not None
         assert result.intent == QuestionIntent.COUNT_TOTAL
-
-    @patch("sap_agent.tools.llm._post_json")
-    def test_anthropic_success(self, mock_post: MagicMock) -> None:
-        mock_post.return_value = {
-            "content": [{"type": "text", "text": json.dumps({"intent": "existence", "column": "status"})}]
-        }
-        cfg = self._config(provider="anthropic")
-        result = call_llm_for_intent("is there any approved order?", cfg)
-        assert result is not None
-        assert result.intent == QuestionIntent.EXISTENCE
 
     @patch("sap_agent.tools.llm._post_json")
     def test_empty_content_returns_none(self, mock_post: MagicMock) -> None:
@@ -227,21 +193,6 @@ class TestCallLlmForIntent:
         cfg = self._config()
         call_llm_for_intent("q", cfg)
         assert mock_post.call_args[0][0].endswith("/chat/completions")
-
-    @patch("sap_agent.tools.llm._post_json")
-    def test_anthropic_url_construction(self, mock_post: MagicMock) -> None:
-        mock_post.return_value = {"content": [{"type": "text", "text": '{"intent":"count_total"}'}]}
-        cfg = self._config(provider="anthropic")
-        call_llm_for_intent("q", cfg)
-        assert mock_post.call_args[0][0].endswith("/v1/messages")
-
-    @patch("sap_agent.tools.llm._post_json")
-    def test_anthropic_custom_base_url(self, mock_post: MagicMock) -> None:
-        mock_post.return_value = {"content": [{"type": "text", "text": '{"intent":"count_total"}'}]}
-        cfg = self._config(provider="anthropic")
-        cfg.llm_base_url = "http://localhost:8080/v1/messages"
-        call_llm_for_intent("q", cfg)
-        assert mock_post.call_args[0][0] == "http://localhost:8080/v1/messages"
 
     @patch("sap_agent.tools.llm._post_json")
     def test_openai_custom_base_url(self, mock_post: MagicMock) -> None:

@@ -8,16 +8,16 @@ from fakes import FakeCapture, FakeLocator, PageStub
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, IntentConfig, QuestionIntent
-from sap_agent.tools.answer import (
+from sap_agent.tools.answer import evaluate_question
+from sap_agent.tools.answer_core import (
     _checksum,
     _infer_auto_route,
-    _lookup_customer,
     _matches,
     _normalize,
     _parse_amount,
     _resolve_json_key,
-    evaluate_question,
 )
+from sap_agent.tools.answer_lookup import _lookup_customer
 
 ROWS: list[list[str]] = [
     ["SO-1001", "Acme Corp", "12450", "Approved\nObject Status", "2026-01-15"],

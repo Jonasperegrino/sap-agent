@@ -18,8 +18,6 @@ from ..schemas import Severity, UxIssue
 if TYPE_CHECKING:
     from ..protocols import PageLike
 
-_VISIBLE_PAGE = ".sapMPage:visible"
-
 #: bound per-page findings so huge DOMs cannot stall QA (perf)
 MAX_UX_ISSUES = 100
 

@@ -7,13 +7,9 @@ credentials never enter logs (security rule from #645).
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
-
-if TYPE_CHECKING:
-    from ..protocols import ResponseLike
 
 #: JSON-shaped values flowing through capture (bodies, payloads)
 JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | str | int | float | bool | None
@@ -74,7 +70,7 @@ class NetworkCapture:
             pass
         return True
 
-    def _on_response(self, response: ResponseLike) -> None:
+    def _on_response(self, response: Any) -> None:
         if response.url.startswith(self.app_origin):
             self._urls.append(response.url)
             if len(self._urls) > self.max_urls:
@@ -125,10 +121,3 @@ class NetworkCapture:
         if body is not None:
             self._touch(url)
         return body
-
-    def response_payloads(self) -> dict[str, JsonValue]:
-        return dict(self._bodies)
-
-    def matches_fixture(self, url_substring: str, expected: list[dict[str, Any]]) -> bool:
-        body = self.latest_response_body(url_substring)
-        return json.loads(json.dumps(body)) == expected

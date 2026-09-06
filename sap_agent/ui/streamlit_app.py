@@ -33,7 +33,8 @@ except (RuntimeError, OSError, AttributeError, ValueError, TypeError, KeyError) 
 @st.cache_resource(show_spinner=False)
 def _chromium_ready() -> bool:
     import pathlib as _pl2
-    import subprocess as _sp2
+
+    from sap_agent.browser import try_install_chromium
 
     bases = [
         _pl2.Path.home() / ".cache" / "ms-playwright",
@@ -42,20 +43,8 @@ def _chromium_ready() -> bool:
     ]
     if any(_b.exists() and any(_b.glob("chromium*")) for _b in bases):
         return True
-    # install both chromium and headless shell; --with-deps fails without sudo on Cloud,
-    # so try without, then fallback
-    for _cmd in (
-        ["playwright", "install", "chromium"],
-        ["playwright", "install", "chromium-headless-shell"],
-        ["python", "-m", "playwright", "install", "chromium"],
-    ):
-        try:
-            _sp2.run(_cmd, check=False, timeout=180)
-            if any(_b.exists() and any(_b.glob("chromium*")) for _b in bases):
-                return True
-        except (OSError, _sp2.SubprocessError):
-            continue
-    return False
+    try_install_chromium()
+    return any(_b.exists() and any(_b.glob("chromium*")) for _b in bases)
 
 
 with contextlib.suppress(RuntimeError, OSError, AttributeError):
@@ -63,108 +52,8 @@ with contextlib.suppress(RuntimeError, OSError, AttributeError):
 
 st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
 
-
-# Load background image as base64 for CSS (cached: no re-encode per rerun).
-@st.cache_resource(show_spinner=False)
-def _load_bg() -> str:
-    for _bp in [
-        Path(__file__).parent / "assets" / "worldmap_small.jpg",
-        Path(__file__).parent.parent / "sap_agent" / "ui" / "assets" / "worldmap_small.jpg",
-        Path.cwd() / "sap_agent" / "ui" / "assets" / "worldmap_small.jpg",
-        Path(__file__).resolve().parent / "assets" / "worldmap_small.jpg",
-    ]:
-        if _bp.exists():
-            try:
-                import base64
-
-                return base64.b64encode(_bp.read_bytes()).decode()
-            except (OSError, ValueError):
-                continue
-    return ""
-
-
-_bg_img = _load_bg()
-_bg_css = f"data:image/jpeg;base64,{_bg_img}" if _bg_img else "none"
-
-
-@st.cache_data(show_spinner=False)
-def _make_css(bg_css: str) -> str:
-    return (
-        "<style>"
-        "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');"
-        "* { font-family: 'Inter', system-ui, -apple-system, sans-serif; }"
-        '[data-testid="stHeader"] { background: transparent !important; }'
-        'header[data-testid="stHeader"] { background: transparent !important; }'
-        '[data-testid="stAppViewContainer"] { background-color: #0a0f1a;'
-        " background-image: url(" + bg_css + ");"
-        " background-size: cover; background-position: center;"
-        " background-attachment: fixed; background-repeat: no-repeat;"
-        " color: #e2e8f0; min-height: 100vh; }"
-        " @media (prefers-reduced-motion: reduce) {"
-        ' [data-testid="stAppViewContainer"] { background-attachment: scroll; } }'
-        '[data-testid="stAppViewContainer"] > div:first-child {'
-        " max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }"
-        " @media (min-width: 768px) {"
-        ' [data-testid="stAppViewContainer"] > div:first-child { padding: 3rem 2rem; } }'
-        '[data-testid="stAppViewBlockContainer"] { background: transparent; }'
-        '[data-testid="stSidebar"] { background: #0f172a; border-right: 1px solid rgba(0,212,255,0.12); }'
-        '[data-testid="stSidebar"] label, [data-testid="stSidebar"] p, '
-        '[data-testid="stSidebar"] span { color: #e2e8f0 !important; }'
-        '[data-testid="stSidebar"] .stCaption { color: #94a3b8 !important; }'
-        '[data-testid="stAppDeployButton"] { display: none !important; }'
-        ".atlas-title { font-size: 2.8rem; font-weight: 800; text-align: center; "
-        "background: linear-gradient(135deg, #00d4ff 0%, #00ff88 100%); "
-        "-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }"
-        ".atlas-sub { color: #94a3b8; text-align: center; margin-bottom: 1.5rem; }"
-        ".glass-card { background: rgba(15,23,42,0.70); backdrop-filter: blur(10px); "
-        "border: 1px solid rgba(0,212,255,0.18); border-radius: 12px; "
-        "padding: 1.2rem; margin-bottom: 1rem; }"
-        ".glass-card-success { background: rgba(0,212,255,0.10); border-color: rgba(0,212,255,0.30); }"
-        ".glass-card-error { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.30); }"
-        '.stTabs [data-baseweb="tab-list"] { gap: 0.5rem; background: rgba(15,23,42,0.55); '
-        "padding: 0.4rem; border-radius: 10px; border: 1px solid rgba(0,212,255,0.12); }"
-        '.stTabs [data-baseweb="tab"] { background: transparent; border-radius: 8px; '
-        "padding: 0.5rem 1.2rem; color: #94a3b8; font-weight: 500; }"
-        '.stTabs [aria-selected="true"] { background: rgba(0,212,255,0.18) !important; '
-        "color: #00d4ff !important; border: 1px solid rgba(0,212,255,0.25); }"
-        '.stTabs [data-baseweb="tab-border"], .stTabs [data-baseweb="tab-highlight"] { display: none; }'
-        'div[data-testid="stButton"] button[kind="primary"], '
-        'div[data-testid="stFormSubmitButton"] button[kind="primary"] { '
-        "background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%) !important; "
-        "color: #0a0f1a !important; border: none !important; "
-        "border-radius: 8px !important; font-weight: 700 !important; }"
-        'div[data-testid="stButton"] button:hover { '
-        "background: linear-gradient(135deg, #00ff88 0%, #00d4ff 100%) !important; "
-        "box-shadow: 0 0 18px rgba(0,212,255,0.35) !important; }"
-        '[data-testid="stSidebar"] .stTextInput input, '
-        'div[data-testid="stTextArea"] textarea { '
-        "background: #1e293b !important; color: #f1f5f9 !important; "
-        "border: 1px solid rgba(0,212,255,0.22) !important; border-radius: 8px !important; }"
-        '[data-testid="stSidebar"] .stTextInput input:focus, '
-        'div[data-testid="stTextArea"] textarea:focus { '
-        "border-color: #00d4ff !important; box-shadow: 0 0 0 1px rgba(0,212,255,0.28) !important; }"
-        'div[data-testid="stTextArea"] textarea::placeholder { color: #64748b !important; }'
-        '[data-testid="stSidebar"] .stSelectbox > div > div { '
-        "background: #1e293b !important; border: 1px solid rgba(0,212,255,0.22) !important; "
-        "color: #f1f5f9 !important; }"
-        '[data-testid="stMetric"] { '
-        "background: rgba(15,23,42,0.55); border: 1px solid rgba(0,212,255,0.14); "
-        "border-radius: 10px; padding: 0.8rem; }"
-        '[data-testid="stMetricValue"] { color: #00d4ff; font-weight: 700; }'
-        '[data-testid="stMetricLabel"] { '
-        "color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }"
-        ".stSpinner > div { border-top-color: #00d4ff !important; }"
-        "footer { margin-top: 2.5rem; padding: 1.2rem 0; "
-        "border-top: 1px solid rgba(0,212,255,0.12); "
-        "text-align: center; color: #64748b; font-size: 0.8rem; }"
-        "</style>"
-    )
-
-
-st.markdown(_make_css(_bg_css), unsafe_allow_html=True)
-
-st.markdown('<div class="atlas-title">Atlas for SAP</div>', unsafe_allow_html=True)
-st.markdown('<div class="atlas-sub">Autonomous SAP Fiori discovery & Q&A agent</div>', unsafe_allow_html=True)
+st.title("Atlas for SAP")
+st.caption("Autonomous SAP Fiori discovery & Q&A agent")
 
 if "last_result" not in st.session_state:
     st.session_state["last_result"] = None
@@ -175,8 +64,7 @@ with st.sidebar:
 
     _default_url = _os.environ.get("SAP_AGENT_URL", "https://jonasperegrino.github.io/sap-fiori/")
     _env_password = _os.environ.get("SAP_AGENT_PASSWORD", "")
-    # Form batches sidebar edits: without it every keystroke reruns the app
-    # and re-renders CSS + background.
+    # Form batches sidebar edits: without it every keystroke reruns the app.
     with st.form("connection"):
         app_url = st.text_input("App URL", value=_default_url)
         username = st.text_input("Username", value="demo")

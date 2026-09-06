@@ -47,10 +47,6 @@ class AuthResult(BaseModel):
         """Failure-kind string; 'unknown' when unset (success results)."""
         return self.kind.value if self.kind is not None else "unknown"
 
-    def sanitized(self) -> dict[str, Any]:
-        """Serializable form guaranteed free of credentials."""
-        return self.model_dump()
-
 
 class TraceEntry(BaseModel):
     """One recorded agent action (trace stream, JSONL-friendly)."""
@@ -404,8 +400,6 @@ class Config(BaseModel):
     password: SecretStr = SecretStr("")
     login_timeout_ms: int = Field(default=30_000, ge=1_000)
     retry_budget: int = Field(default=3, ge=1, le=10)
-    #: base delay for exponential backoff between login retries (#680), capped at 5s
-    retry_backoff_s: float = Field(default=0.5, ge=0)
     #: navigation wait window (#676)
     nav_timeout_ms: int = Field(default=10_000, ge=1_000)
     #: table extraction wait window (#676)
@@ -413,14 +407,10 @@ class Config(BaseModel):
     headless: bool = True
     artifacts_dir: str = "artifacts"
     log_level: str = "INFO"
-    #: post-login route that proves authentication succeeded, e.g. "#/dashboard"
-    success_route: str | None = None
     #: LLM slot (issue #647 extension): OpenAI-compatible API for intent parsing
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-5"
     llm_base_url: str = "https://api.openai.com/v1"
-    llm_provider: str = "openai"  # openai | anthropic | openai-compatible
-    llm_timeout_s: float = Field(default=15.0, ge=1.0)
 
     @classmethod
     def from_env(cls, **overrides: Any) -> Config:
@@ -435,15 +425,6 @@ class Config(BaseModel):
             except ValueError as exc:
                 raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
 
-        def _float(name: str) -> float | None:
-            raw = os.environ.get(name)
-            if not raw:
-                return None
-            try:
-                return float(raw)
-            except ValueError as exc:
-                raise ValueError(f"{name} must be a number, got {raw!r}") from exc
-
         env: dict[str, Any] = {
             "app_url": os.environ.get("SAP_AGENT_URL")
             or os.environ.get("SAP_AGENT_APP_URL", "https://jonasperegrino.github.io/sap-fiori/"),
@@ -452,15 +433,12 @@ class Config(BaseModel):
             "log_level": os.environ.get("SAP_AGENT_LOG_LEVEL", "INFO"),
             "headless": os.environ.get("SAP_AGENT_HEADLESS", "true").lower() not in {"0", "false", "no"},
             "artifacts_dir": os.environ.get("SAP_AGENT_ARTIFACTS_DIR", "artifacts"),
-            "success_route": os.environ.get("SAP_AGENT_SUCCESS_ROUTE"),
         }
         for field, name, parse in (
             ("login_timeout_ms", "SAP_AGENT_LOGIN_TIMEOUT_MS", _int),
             ("retry_budget", "SAP_AGENT_RETRY_BUDGET", _int),
-            ("retry_backoff_s", "SAP_AGENT_RETRY_BACKOFF_S", _float),
             ("nav_timeout_ms", "SAP_AGENT_NAV_TIMEOUT_MS", _int),
             ("extract_timeout_ms", "SAP_AGENT_EXTRACT_TIMEOUT_MS", _int),
-            ("llm_timeout_s", "SAP_AGENT_LLM_TIMEOUT_S", _float),
         ):
             value = parse(name)
             if value is not None:
@@ -475,9 +453,6 @@ class Config(BaseModel):
         raw_llm_base = os.environ.get("SAP_AGENT_LLM_BASE_URL")
         if raw_llm_base:
             env["llm_base_url"] = raw_llm_base.rstrip("/")
-        raw_llm_provider = os.environ.get("SAP_AGENT_LLM_PROVIDER")
-        if raw_llm_provider:
-            env["llm_provider"] = raw_llm_provider
         env.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**env)
 

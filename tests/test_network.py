@@ -62,13 +62,6 @@ class TestNetworkCaptureUnit:
         assert capture.latest_response_body("sales.json") == FIXTURE
         assert capture.latest_response_body("missing") is None
 
-    def test_matches_fixture(self) -> None:
-        page = EmittingPage([("http://localhost:8080/data/sales.json", FIXTURE)])
-        capture = NetworkCapture(page, "http://localhost:8080")
-        page.emit()
-        assert capture.matches_fixture("sales.json", FIXTURE)
-        assert not capture.matches_fixture("sales.json", [{"x": 1}])
-
     def test_non_json_body_ignored(self) -> None:
         class NonJsonResponse(FakeResponse):
             def json(self) -> object:
@@ -120,20 +113,6 @@ class TestTableExtractionUnit:
         assert capture.response_body("http://localhost:8080/data/sales.json") == FIXTURE
         assert capture.response_body("http://localhost:8080/data/nope.json") is None
 
-    def test_response_payloads_returns_all(self) -> None:
-        page = EmittingPage(
-            [
-                ("http://localhost:8080/data/sales.json", FIXTURE),
-                ("http://localhost:8080/data/products.json", [{"id": 1}]),
-            ]
-        )
-        capture = NetworkCapture(page, "http://localhost:8080")
-        page.emit()
-        payloads = capture.response_payloads()
-        assert len(payloads) == 2
-        assert "http://localhost:8080/data/sales.json" in payloads
-        assert "http://localhost:8080/data/products.json" in payloads
-
     def test_latest_wins_on_duplicate_url(self) -> None:
         page = EmittingPage(
             [
@@ -151,20 +130,6 @@ class TestTableExtractionUnit:
         capture = NetworkCapture(page, "http://localhost:8080")
         assert capture.capture_response_urls() == []
         assert capture.latest_response_body("anything") is None
-        assert capture.response_payloads() == {}
-
-
-class TestSuggestSemanticSelector:
-    def test_hardcoded_id_gets_semantic_replacement(self) -> None:
-        from sap_agent.tools.extract import TABLE_ROLE_SELECTOR, suggest_semantic_selector
-
-        assert suggest_semantic_selector("#__xmlview1--salesTable-listUl") == TABLE_ROLE_SELECTOR
-        assert "salesTable" not in suggest_semantic_selector("#__xmlview1--salesTable-listUl")
-
-    def test_already_semantic_selector_unchanged(self) -> None:
-        from sap_agent.tools.extract import suggest_semantic_selector
-
-        assert suggest_semantic_selector(".sapMListTbl") == ".sapMListTbl"
 
 
 class TestNetworkCaptureLru:

@@ -1,6 +1,6 @@
 """LLM slot for intent parsing (issue #647 extension).
 
-Thin OpenAI/Anthropic-compatible client. No extra deps — uses stdlib
+Thin OpenAI-compatible client. No extra deps — uses stdlib
 urllib so `uv add openai` is optional. Deterministic fallback: if no
 key or call fails, caller keeps the rule-based IntentConfig.
 
@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-KNOWN_COLUMNS = ("status", "customer", "amount", "built", "price", "stock", "category", "unit", "qty", "name")
 KNOWN_STATUSES = ("Approved", "Pending", "Shipped", "Rejected", "Cancelled")
 
 SYSTEM_PROMPT = """You are a Fiori intent parser. Map the user question to JSON.
@@ -66,16 +65,6 @@ def _payload_openai(question: str, model: str) -> dict[str, Any]:
     }
 
 
-def _payload_anthropic(question: str, model: str) -> dict[str, Any]:
-    return {
-        "model": model,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": question}],
-        "temperature": 0,
-        "max_tokens": 512,
-    }
-
-
 def _post_json(url: str, headers: dict[str, str], body: dict[str, Any], timeout_s: float) -> dict[str, Any]:
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -83,13 +72,7 @@ def _post_json(url: str, headers: dict[str, str], body: dict[str, Any], timeout_
         return json.loads(resp.read().decode())
 
 
-def _extract_content(provider: str, resp: dict[str, Any]) -> str:
-    if provider == "anthropic":
-        # {"content":[{"type":"text","text":"{...}"}]}
-        for block in resp.get("content", []):
-            if block.get("type") == "text":
-                return block.get("text", "")
-        return ""
+def _extract_content(resp: dict[str, Any]) -> str:
     # openai: choices[0].message.content
     choices = resp.get("choices", [])
     if choices:
@@ -143,32 +126,22 @@ def call_llm_for_intent(question: str, config: Config, ctx: SessionContext | Non
     if not api_key:
         return None
 
-    provider = (config.llm_provider or "openai").lower()
     base = config.llm_base_url.rstrip("/")
     model = config.llm_model
 
-    if provider == "anthropic":
-        url = f"{base}/v1/messages" if not base.endswith("/v1/messages") else base
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        }
-        payload = _payload_anthropic(question, model)
-    else:
-        # openai + compatible (openai, azure, local llm)
-        url = f"{base}/chat/completions" if not base.endswith("/chat/completions") else base
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
-        payload = _payload_openai(question, model)
+    # openai + compatible (openai, azure, local llm)
+    url = f"{base}/chat/completions" if not base.endswith("/chat/completions") else base
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = _payload_openai(question, model)
 
     try:
-        resp = _post_json(url, headers, payload, config.llm_timeout_s)
-        content = _extract_content(provider, resp)
+        resp = _post_json(url, headers, payload, 15.0)
+        content = _extract_content(resp)
         if not content:
-            logger.warning("llm empty content provider=%s", provider)
+            logger.warning("llm empty content")
             return None
         parsed = _parse_llm_json(content)
         if ctx is not None:

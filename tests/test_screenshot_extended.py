@@ -6,7 +6,7 @@ from fakes import ScreenshotRecordingPage
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config
-from sap_agent.tools.screenshot import _slug, _stamp, capture_element, capture_page
+from sap_agent.tools.screenshot import _slug, _stamp, capture_page
 
 
 def _ctx() -> SessionContext:
@@ -56,18 +56,3 @@ class TestCapturePage:
         capture_page(page, "orders", _ctx())
         assert len(page.screenshot_calls) == 1
         assert page.screenshot_calls[0]["full_page"] is True
-
-
-class TestCaptureElement:
-    def test_returns_metadata_with_element(self) -> None:
-        page = ScreenshotRecordingPage()
-        result = capture_element(page, ".sapMBtn", "catalog", _ctx())
-        assert result.route == "catalog"
-        assert result.element == ".sapMBtn"
-        assert result.width == 120
-        assert result.height == 40
-
-    def test_element_screenshot_called(self) -> None:
-        page = ScreenshotRecordingPage()
-        result = capture_element(page, "button", "x", _ctx())
-        assert result.path.endswith(".png")

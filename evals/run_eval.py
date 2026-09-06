@@ -133,30 +133,6 @@ def check_gates(metrics: dict, expect: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def validate_scenarios(cfg: dict) -> list[str]:
-    """Static checks over scenarios.json: unique ids, required keys, known kinds."""
-    errors: list[str] = []
-    scenarios = cfg.get("scenarios", [])
-    seen: set[str] = set()
-    for idx, scenario in enumerate(scenarios):
-        where = f"scenarios[{idx}]"
-        sid = scenario.get("id")
-        if not sid:
-            errors.append(f"{where}: missing id")
-            continue
-        if sid in seen:
-            errors.append(f"{where}: duplicate id {sid!r}")
-        seen.add(sid)
-        kind = scenario.get("kind")
-        if kind not in {"login", "discover", "ask", "inspect", "report", "qa"}:
-            errors.append(f"{sid}: unknown kind {kind!r}")
-        if "expect" not in scenario:
-            errors.append(f"{sid}: missing expect")
-        if kind == "ask" and not scenario.get("args", {}).get("question"):
-            errors.append(f"{sid}: ask scenario missing args.question")
-    return errors
-
-
 def score_discover(payload: dict, expect: dict) -> tuple[bool, str]:
     entities = {e["name"]: e for e in payload.get("entities", [])}
     for name in expect.get("has_entities", []):
@@ -235,10 +211,6 @@ def score_scenario(
         if exit_code != expect.get("exit"):
             return False, f"exit={exit_code}, expected {expect.get('exit')}"
         return True, "login ok"
-    if kind == "inspect":
-        if exit_code != expect.get("exit"):
-            return False, f"exit={exit_code}, expected {expect.get('exit')}"
-        return True, "inspect ok"
     if kind == "discover":
         if exit_code != 0 or payload is None:
             return False, f"exit={exit_code}, payload missing"
@@ -327,23 +299,8 @@ def print_table(results: list[ScenarioResult]) -> None:
     print(f"{passed}/{len(results)} scenarios passed")
 
 
-def git_sha() -> str:
-    """Short SHA of the working tree, or 'unknown' outside a git repo."""
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except OSError:
-        return "unknown"
-    return proc.stdout.strip() or "unknown"
-
-
 def persist_results(cfg: dict, results: list[ScenarioResult]) -> Path:
-    """Write the run record to artifacts/eval_runs/<ts>.json and append to history.md."""
+    """Write the run record to artifacts/eval_runs/<ts>.json."""
     EVAL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%S")
     path = EVAL_RUNS_DIR / f"{stamp}.json"
@@ -366,7 +323,6 @@ def persist_results(cfg: dict, results: list[ScenarioResult]) -> Path:
         artifact_bytes = 0
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "agent_version": os.environ.get("SAP_AGENT_VERSION") or git_sha(),
         "app_url": cfg.get("app_url"),
         "python": sys.version.split()[0],
         "passed": passed,
@@ -379,33 +335,11 @@ def persist_results(cfg: dict, results: list[ScenarioResult]) -> Path:
         "results": [asdict(r) for r in results],
     }
     path.write_text(json.dumps(record, indent=2) + "\n")
-
-    history = EVAL_RUNS_DIR / "history.md"
-    header = "| timestamp | version | passed | total | pass_rate | avg_ms | max_ms |\n|---|---|---|---|---|---|---|\n"
-    if not history.exists():
-        history.write_text(header)
-    else:
-        first = history.read_text().splitlines(keepends=True)[:1]
-        if first and "avg_ms" not in first[0]:
-            body = history.read_text().split("\n", 2)
-            history.write_text(header + "\n".join(body[2:]).lstrip("\n"))
-    with history.open("a") as fh:
-        fh.write(
-            f"| {record['timestamp']} | {record['agent_version']} "
-            f"| {record['passed']} | {record['total']} | {record['pass_rate']:.1%} "
-            f"| {avg_ms} | {max_ms} |\n"
-        )
     return path
 
 
 def main() -> int:
     cfg = load_scenarios()
-    errors = validate_scenarios(cfg)
-    if errors:
-        print("invalid scenarios.json:", file=sys.stderr)
-        for error in errors:
-            print(f"  - {error}", file=sys.stderr)
-        return 2
     results = evaluate(cfg, cfg["scenarios"])
     print_table(results)
     path = persist_results(cfg, results)

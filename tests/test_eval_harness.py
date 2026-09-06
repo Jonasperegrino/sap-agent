@@ -152,7 +152,7 @@ class TestBuildEnv:
 
 
 class TestPersistResults:
-    def test_persists_record_and_history(self, tmp_path, monkeypatch) -> None:
+    def test_persists_record(self, tmp_path, monkeypatch) -> None:
         import evals.run_eval as run_eval
 
         monkeypatch.setattr(run_eval, "EVAL_RUNS_DIR", tmp_path)
@@ -171,7 +171,3 @@ class TestPersistResults:
         assert record["pass_rate"] == 0.5
         assert record["results"][0]["scenario_id"] == "ask-count-approved"
         assert record["results"][1]["metrics"]["exit"] == 1
-
-        history = (tmp_path / "history.md").read_text()
-        assert "| timestamp | version | passed | total | pass_rate |" in history
-        assert "| 50.0% |" in history

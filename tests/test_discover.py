@@ -12,7 +12,7 @@ from sap_agent.context import SessionContext
 from sap_agent.schemas import Config
 from sap_agent.tools.discover import _detect_domain, _entity_from_endpoint, discover_app
 from sap_agent.tools.extract import TABLE_ROLE_SELECTOR, TABLE_VISIBLE_SELECTOR
-from sap_agent.tools.nav import PAGE_TITLES, VISIBLE_PAGE_TITLE
+from sap_agent.tools.nav import PAGE_TITLES
 
 
 class FakeLocator:
@@ -78,7 +78,7 @@ class FakePage(PageStub):
     def locator(self, selector: str) -> Any:
         if selector in (".sapMIBar-title", ".sapMTitle"):
             return FakeLocator([self.title_text])
-        if selector == VISIBLE_PAGE_TITLE:
+        if selector == ".sapMPage:visible .sapMTitle":
             return FakeLocator(list(PAGE_TITLES.values()))
         if selector in (TABLE_ROLE_SELECTOR, TABLE_VISIBLE_SELECTOR):
             return self.table_locator if self.table_locator is not None else NotFoundLocator()

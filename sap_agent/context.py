@@ -26,9 +26,6 @@ class SessionContext:
     def artifact_path(self, name: str) -> Path:
         return self.artifacts_dir / name
 
-    def trace_lines(self) -> list[str]:
-        return [entry.model_dump_json() for entry in self.trace]
-
     def snapshot(self) -> list[dict]:
         """Serializable trace copy (JSON-friendly, no secrets by contract)."""
         return [entry.model_dump() for entry in self.trace]

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 LOGIN_USER_SELECTOR = 'input[placeholder="Username"]'
 LOGIN_PASSWORD_SELECTOR = 'input[placeholder="Password"]'
 LOGIN_SUBMIT_SELECTOR = 'button:has-text("Log In")'
-WELCOME_HEADER_SELECTOR = ".sapMObjectHeaderTitle, .sapMOHTitle"
 
 
 def wait_for_ui5_ready(page: PageLike, timeout_ms: int = 30_000) -> None:
@@ -50,12 +49,3 @@ def fill_login_form(page: PageLike, username: str, password: str, timeout_ms: in
     # Playwright fills the field; the raw value is not exposed to logs by this bridge.
     pwd.fill(password)
     btn.click()
-
-
-def welcome_text(page: PageLike, timeout_ms: int = 10_000) -> str | None:
-    try:
-        el = page.locator(WELCOME_HEADER_SELECTOR).first
-        el.wait_for(state="visible", timeout=timeout_ms)
-        return el.inner_text().strip()
-    except PlaywrightTimeoutError:
-        return None

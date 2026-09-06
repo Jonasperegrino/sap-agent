@@ -177,16 +177,3 @@ def get_all_tables(page: PageLike, timeout_ms: int = 15_000, max_rows: int = DEF
         if columns or rows:
             results.append(TableData(columns=columns, rows=rows, row_count=len(rows)))
     return results
-
-
-def suggest_semantic_selector(failed_selector: str) -> str:
-    """Rule-based fix suggestion for failed control-id selectors (AC6 demo).
-
-    Detects hardcoded UI5 control ids (`__xmlview{N}--{id}`) and proposes the
-    semantic table selector as replacement. A future LLM slot would map the
-    failure message + DOM dump to a richer suggestion; this is the rule-based
-    first step.
-    """
-    if "__xmlview" in failed_selector or "salesTable" in failed_selector:
-        return TABLE_ROLE_SELECTOR
-    return failed_selector

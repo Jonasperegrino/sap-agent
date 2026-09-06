@@ -35,6 +35,9 @@ BAD_CREDENTIALS_TOAST = "Invalid credentials"
 #: upper bound for the exponential retry delay (#680)
 MAX_BACKOFF_S = 5.0
 
+#: base delay for exponential backoff between login retries
+BACKOFF_S = 0.5
+
 
 def _backoff_delay(base_s: float, attempt: int) -> float:
     """Exponential backoff for the given 1-based attempt, capped at MAX_BACKOFF_S."""
@@ -111,7 +114,7 @@ def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
             if not bridge.has_login_form(page, timeout_ms=config.login_timeout_ms):
                 # No plain form: could already be on a shell (session reused) or SSO boundary.
                 route = bridge.current_route(page)
-                if config.success_route and route and route.startswith(config.success_route):
+                if route and route.startswith("#/dashboard"):
                     ctx.record("auth", "login.ok", "session reused", url=page.url)
                     return AuthResult(ok=True, landing_url=page.url, attempts=attempts, verified_route=route)
                 raise AuthError(
@@ -131,7 +134,7 @@ def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
 
             outcome, detail = _login_outcome(
                 page,
-                success_hash=config.success_route or "#/dashboard",
+                success_hash="#/dashboard",
                 timeout_ms=config.login_timeout_ms,
             )
             if outcome == "bad_credentials":
@@ -146,9 +149,7 @@ def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
                 raise AuthError(result)
 
             landing_route = bridge.current_route(page)
-            if outcome == "success" or (
-                config.success_route and landing_route and landing_route.startswith(config.success_route)
-            ):
+            if outcome == "success" or (landing_route and landing_route.startswith("#/dashboard")):
                 ctx.record("auth", "login.ok", "landing verified", url=page.url)
                 return AuthResult(
                     ok=True,
@@ -190,7 +191,7 @@ def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
                 f"transient {exc.result.kind_value()}",
                 url=page.url,
             )
-            delay = _backoff_delay(config.retry_backoff_s, attempts)
+            delay = _backoff_delay(BACKOFF_S, attempts)
             ctx.record("auth", "login.backoff", f"{delay:.1f}s before retry")
             time.sleep(delay)
             continue
@@ -211,7 +212,7 @@ def login(page: PageLike, config: Config, ctx: SessionContext) -> AuthResult:
                         detail=f"login failed: {kind.value}",
                     )
                 ) from exc
-            delay = _backoff_delay(config.retry_backoff_s, attempts)
+            delay = _backoff_delay(BACKOFF_S, attempts)
             ctx.record("auth", "login.backoff", f"{delay:.1f}s before retry")
             time.sleep(delay)
             continue

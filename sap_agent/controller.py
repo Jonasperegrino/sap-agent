@@ -44,19 +44,6 @@ class Candidate:
     rationale: str = ""
 
 
-class ReasoningChain:
-    """Accumulates planner decisions in order; dumped onto AgentResult."""
-
-    def __init__(self) -> None:
-        self._decisions: list[PlannerDecision] = []
-
-    def record(self, decision: PlannerDecision) -> None:
-        self._decisions.append(decision)
-
-    def snapshot(self) -> list[PlannerDecision]:
-        return list(self._decisions)
-
-
 def evaluate_step_result(result: StepResult) -> bool:
     """A step counts as achieved only on SUCCESS (#693)."""
     return result.status == StepStatus.SUCCESS
@@ -82,6 +69,56 @@ class AgentLoop:
         self.stuck_threshold = stuck_threshold
         self.retry_budget = retry_budget if retry_budget is not None else config.retry_budget
         self._nav_loop_count = 0
+
+    def _on_failure(
+        self,
+        goal: str,
+        limit: int,
+        steps_used: int,
+        result: StepResult,
+        name: str,
+        failures: int,
+        retries_left: int,
+        reasoning: list[PlannerDecision] | None = None,
+    ) -> tuple[AgentResult | None, int, int]:
+        """Shared failure tail for run/run_planned: stuck abort, transient retry, or fail-fast.
+
+        Returns (terminal_result, failures, retries_left); None result means retry (caller continues).
+        """
+        failures += 1
+        failure_kind = result.kind or FailureKind.AGENT_LIMITATION
+        if failures >= self.stuck_threshold:
+            return (
+                self._finish(
+                    goal,
+                    limit,
+                    steps_used,
+                    success=False,
+                    reason=f"{name} failed {failures} times in a row",
+                    failure_kind=failure_kind,
+                    reasoning=reasoning,
+                ),
+                failures,
+                retries_left,
+            )
+        if (result.transient or should_retry(failure_kind.value)) and retries_left > 0:
+            retries_left -= 1
+            logger.info("transient failure on %s — state reset (%d retries left)", name, retries_left)
+            self._reset_state()
+            return None, failures, retries_left
+        return (
+            self._finish(
+                goal,
+                limit,
+                steps_used,
+                success=False,
+                reason=f"{name} failed: {result.detail or failure_kind.value}",
+                failure_kind=failure_kind,
+                reasoning=reasoning,
+            ),
+            failures,
+            retries_left,
+        )
 
     def run(self, goal: str, steps: list[Step], budget: int | None = None) -> AgentResult:
         """Execute steps in order until success, budget exhaustion, or a stuck abort."""
@@ -137,50 +174,20 @@ class AgentLoop:
                 index += 1
                 continue
 
-            consecutive_failures += 1
-            failure_kind = result.kind or FailureKind.AGENT_LIMITATION
-            if consecutive_failures >= self.stuck_threshold:
-                return self._finish(
-                    goal,
-                    limit,
-                    steps_used,
-                    success=False,
-                    reason=f"{result.tool}.{result.action} failed {consecutive_failures} times in a row",
-                    failure_kind=failure_kind,
-                )
-
-            if (result.transient or should_retry(failure_kind.value)) and retries_left > 0:
-                retries_left -= 1
-                logger.info(
-                    "transient failure on %s.%s — state reset (%d retries left)",
-                    result.tool,
-                    result.action,
-                    retries_left,
-                )
-                self._reset_state()
-                continue
-
-            return self._finish(
+            finished, consecutive_failures, retries_left = self._on_failure(
                 goal,
                 limit,
                 steps_used,
-                success=False,
-                reason=f"step {result.tool}.{result.action} failed: {result.detail or failure_kind.value}",
-                failure_kind=failure_kind,
+                result,
+                f"{result.tool}.{result.action}",
+                consecutive_failures,
+                retries_left,
             )
+            if finished is not None:
+                return finished
+            continue
 
         return self._finish(goal, limit, steps_used, success=True, outcome=outcome)
-
-    def decide_next_step(
-        self,
-        candidates: list[Candidate],
-        history: list[StepResult],
-    ) -> Candidate | None:
-        """First candidate whose guard passes wins — table order is priority (#693)."""
-        for candidate in candidates:
-            if candidate.applies(history):
-                return candidate
-        return None
 
     def run_planned(
         self,
@@ -198,7 +205,7 @@ class AgentLoop:
         reasoning chain.
         """
         limit = budget or self.budget
-        chain = ReasoningChain()
+        chain: list[PlannerDecision] = []
         history: list[StepResult] = []
         steps_used = 0
         repeats = 0
@@ -216,10 +223,10 @@ class AgentLoop:
                     success=False,
                     reason="step budget exhausted",
                     failure_kind=FailureKind.AGENT_LIMITATION,
-                    reasoning=chain.snapshot(),
+                    reasoning=list(chain),
                 )
 
-            candidate = self.decide_next_step(candidates, history)
+            candidate = next((c for c in candidates if c.applies(history)), None)
             if candidate is None:
                 return self._finish(
                     goal,
@@ -228,7 +235,7 @@ class AgentLoop:
                     success=False,
                     reason="no viable action for current state",
                     failure_kind=FailureKind.AGENT_LIMITATION,
-                    reasoning=chain.snapshot(),
+                    reasoning=list(chain),
                 )
 
             steps_used += 1
@@ -241,7 +248,7 @@ class AgentLoop:
                 url=result.url,
                 detail=candidate.rationale,
             )
-            chain.record(
+            chain.append(
                 PlannerDecision(
                     candidate=candidate.name,
                     rationale=candidate.rationale,
@@ -261,7 +268,7 @@ class AgentLoop:
                     success=False,
                     reason=f"candidate {candidate.name} repeated {repeats}x without reaching the goal",
                     failure_kind=FailureKind.NAV_LOOP,
-                    reasoning=chain.snapshot(),
+                    reasoning=list(chain),
                 )
             history.append(result)
 
@@ -271,38 +278,21 @@ class AgentLoop:
                     outcome = result.payload
                 continue
 
-            consecutive_failures += 1
-            failure_kind = result.kind or FailureKind.AGENT_LIMITATION
-            if consecutive_failures >= self.stuck_threshold:
-                return self._finish(
-                    goal,
-                    limit,
-                    steps_used,
-                    success=False,
-                    reason=f"{candidate.name} failed {consecutive_failures} times in a row",
-                    failure_kind=failure_kind,
-                    reasoning=chain.snapshot(),
-                )
-            if (result.transient or should_retry(failure_kind.value)) and retries_left > 0:
-                retries_left -= 1
-                logger.info(
-                    "planner: transient failure on %s — state reset (%d retries left)",
-                    candidate.name,
-                    retries_left,
-                )
-                self._reset_state()
-                continue
-            return self._finish(
+            finished, consecutive_failures, retries_left = self._on_failure(
                 goal,
                 limit,
                 steps_used,
-                success=False,
-                reason=f"candidate {candidate.name} failed: {result.detail or failure_kind.value}",
-                failure_kind=failure_kind,
-                reasoning=chain.snapshot(),
+                result,
+                candidate.name,
+                consecutive_failures,
+                retries_left,
+                list(chain),
             )
+            if finished is not None:
+                return finished
+            continue
 
-        return self._finish(goal, limit, steps_used, success=True, outcome=outcome, reasoning=chain.snapshot())
+        return self._finish(goal, limit, steps_used, success=True, outcome=outcome, reasoning=list(chain))
 
     def _run_step(self, step: Step) -> StepResult:
         try:

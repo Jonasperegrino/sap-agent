@@ -20,3 +20,22 @@ def launch_args() -> dict:
     ):
         return {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
     return {}
+
+
+#: install commands tried in order when the browser binary is missing
+INSTALL_COMMANDS: tuple[list[str], ...] = (
+    ["playwright", "install", "chromium"],
+    ["playwright", "install", "chromium-headless-shell"],
+    ["python", "-m", "playwright", "install", "chromium"],
+)
+
+
+def try_install_chromium(timeout: int = 180) -> None:
+    """Best-effort browser install; callers re-check existence afterwards."""
+    import subprocess as _sp
+
+    for cmd in INSTALL_COMMANDS:
+        try:
+            _sp.run(cmd, check=False, timeout=timeout)
+        except (OSError, _sp.SubprocessError):
+            continue

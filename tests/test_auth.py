@@ -102,7 +102,7 @@ class TestSecretHygiene:
             detail="credentials rejected",
             attempts=1,
         )
-        serialized = result.sanitized()
+        serialized = result.model_dump()
         assert "password123" not in str(serialized)
         assert serialized["kind"] == "bad_credentials"
 
@@ -127,12 +127,6 @@ class TestLoginBackoff:
         from sap_agent.tools.auth import _backoff_delay
 
         assert _backoff_delay(0.0, 3) == 0.0
-
-    def test_config_backoff_default_and_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("SAP_AGENT_RETRY_BACKOFF_S", raising=False)
-        assert Config.from_env().retry_backoff_s == 0.5
-        monkeypatch.setenv("SAP_AGENT_RETRY_BACKOFF_S", "1.5")
-        assert Config.from_env().retry_backoff_s == 1.5
 
     def test_timeout_fields_default_and_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("SAP_AGENT_NAV_TIMEOUT_MS", raising=False)

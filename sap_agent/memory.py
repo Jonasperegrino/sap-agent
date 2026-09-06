@@ -16,8 +16,6 @@ from .schemas import DiffIssue, DiffReport, QaReport
 if TYPE_CHECKING:
     from pathlib import Path
 
-HISTORY_DIR = "history"
-
 IssueKey = tuple[str, str, str, str]
 
 

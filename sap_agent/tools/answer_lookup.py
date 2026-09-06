@@ -20,6 +20,53 @@ if TYPE_CHECKING:
     from ..protocols import CaptureLike, PageLike
 
 
+def _match_exact_then_contains(items: list, name_of, value: str) -> list:
+    """Exact match first, substring fallback — shared by network + table paths."""
+    matched = [i for i in items if _matches(str(name_of(i)), value, "exact")]
+    if not matched:
+        lowered = value.lower()
+        matched = [i for i in items if lowered in str(name_of(i)).lower()]
+    return matched
+
+
+def _not_found(
+    question: str, label: str, value: str, source: str, column: str, ctx: SessionContext
+) -> AnsweredQuestion:
+    return _freeze(
+        AnsweredQuestion(
+            question=question,
+            intent=QuestionIntent.LOOKUP,
+            not_found=True,
+            message=f"no {label} with name {value!r}",
+            evidence=AnswerEvidence(source=source, column=column, matched_rows=0, endpoint=source),
+            confidence="high",
+        ),
+        ctx,
+    )
+
+
+def _found(
+    question: str,
+    payload: list[dict],
+    source: str,
+    column: str,
+    matched: int,
+    outcome: str,
+    ctx: SessionContext,
+) -> AnsweredQuestion:
+    ctx.record("answer", "lookup", outcome=outcome)
+    return _freeze(
+        AnsweredQuestion(
+            question=question,
+            intent=QuestionIntent.LOOKUP,
+            answer=payload,
+            evidence=AnswerEvidence(source=source, column=column, matched_rows=matched, endpoint=source),
+            confidence="high",
+        ),
+        ctx,
+    )
+
+
 def _lookup_customer(
     question: str,
     intent: IntentConfig,
@@ -59,25 +106,9 @@ def _lookup_customer(
     customers = fetch_json_body(capture, "customers.json")
 
     if customers is not None:
-        matched = [c for c in customers if _matches(str(c.get("name", "")), value, "exact")]
+        matched = _match_exact_then_contains(customers, lambda c: c.get("name", ""), value)
         if not matched:
-            # fallback contains
-            lowered = value.lower()
-            matched = [c for c in customers if lowered in str(c.get("name", "")).lower()]
-        if not matched:
-            return _freeze(
-                AnsweredQuestion(
-                    question=question,
-                    intent=QuestionIntent.LOOKUP,
-                    not_found=True,
-                    message=f"no customer with name {value!r}",
-                    evidence=AnswerEvidence(
-                        source="customers.json", column=lookup_field, matched_rows=0, endpoint="customers.json"
-                    ),
-                    confidence="high",
-                ),
-                ctx,
-            )
+            return _not_found(question, "customer", value, "customers.json", lookup_field, ctx)
         rec = matched[0]
         answer_payload = [
             {
@@ -93,17 +124,13 @@ def _lookup_customer(
                 "since": rec.get("since"),
             }
         ]
-        ctx.record("answer", "lookup", outcome=f"found {rec.get('name')} contact={rec.get('contact')}")
-        return _freeze(
-            AnsweredQuestion(
-                question=question,
-                intent=QuestionIntent.LOOKUP,
-                answer=answer_payload,
-                evidence=AnswerEvidence(
-                    source="customers.json", column=lookup_field, matched_rows=len(matched), endpoint="customers.json"
-                ),
-                confidence="high",
-            ),
+        return _found(
+            question,
+            answer_payload,
+            "customers.json",
+            lookup_field,
+            len(matched),
+            f"found {rec.get('name')} contact={rec.get('contact')}",
             ctx,
         )
 
@@ -115,24 +142,11 @@ def _lookup_customer(
     contact_idx = col_idx.get("contact")
     if cust_idx is None:
         return None
-    matched_rows = [r for r in snapshot.data.rows if cust_idx < len(r) and _matches(r[cust_idx], value, "exact")]
+    matched_rows = _match_exact_then_contains(
+        [r for r in snapshot.data.rows if cust_idx < len(r)], lambda r: r[cust_idx], value
+    )
     if not matched_rows:
-        lowered = value.lower()
-        matched_rows = [r for r in snapshot.data.rows if cust_idx < len(r) and lowered in r[cust_idx].lower()]
-    if not matched_rows:
-        return _freeze(
-            AnsweredQuestion(
-                question=question,
-                intent=QuestionIntent.LOOKUP,
-                not_found=True,
-                message=f"no customer with name {value!r}",
-                evidence=AnswerEvidence(
-                    source="customersTable", column=lookup_field, matched_rows=0, endpoint="customersTable"
-                ),
-                confidence="high",
-            ),
-            ctx,
-        )
+        return _not_found(question, "customer", value, "customersTable", lookup_field, ctx)
     # return first match contact
     row = matched_rows[0]
     contact_val = row[contact_idx].strip() if contact_idx is not None and contact_idx < len(row) else ""
@@ -146,17 +160,13 @@ def _lookup_customer(
             "phone": row[phone_idx].strip() if phone_idx is not None and phone_idx < len(row) else "",
         }
     ]
-    ctx.record("answer", "lookup", outcome=f"found {value} contact={contact_val} via table")
-    return _freeze(
-        AnsweredQuestion(
-            question=question,
-            intent=QuestionIntent.LOOKUP,
-            answer=answer_payload,
-            evidence=AnswerEvidence(
-                source="customersTable", column=lookup_field, matched_rows=len(matched_rows), endpoint="customersTable"
-            ),
-            confidence="high",
-        ),
+    return _found(
+        question,
+        answer_payload,
+        "customersTable",
+        lookup_field,
+        len(matched_rows),
+        f"found {value} contact={contact_val} via table",
         ctx,
     )
 
@@ -190,24 +200,9 @@ def _lookup_product(
     if products is not None:
         # filter visible only — active true (respect visible-only rule)
         # keep inactive for not_found check, but note visible filter for answer
-        matched = [p for p in products if _matches(str(p.get("name", "")), value, "exact")]
+        matched = _match_exact_then_contains(products, lambda p: p.get("name", ""), value)
         if not matched:
-            lowered = value.lower()
-            matched = [p for p in products if lowered in str(p.get("name", "")).lower()]
-        if not matched:
-            return _freeze(
-                AnsweredQuestion(
-                    question=question,
-                    intent=QuestionIntent.LOOKUP,
-                    not_found=True,
-                    message=f"no product with name {value!r}",
-                    evidence=AnswerEvidence(
-                        source="products.json", column=lookup_field, matched_rows=0, endpoint="products.json"
-                    ),
-                    confidence="high",
-                ),
-                ctx,
-            )
+            return _not_found(question, "product", value, "products.json", lookup_field, ctx)
         rec = matched[0]
         # visible check: if inactive, treat as not visible but still answer via network? For visible-only we note
         answer_payload = [
@@ -220,17 +215,13 @@ def _lookup_product(
                 "active": rec.get("active"),
             }
         ]
-        ctx.record("answer", "lookup", outcome=f"found {rec.get('name')} {lookup_field}={rec.get(lookup_field)}")
-        return _freeze(
-            AnsweredQuestion(
-                question=question,
-                intent=QuestionIntent.LOOKUP,
-                answer=answer_payload,
-                evidence=AnswerEvidence(
-                    source="products.json", column=lookup_field, matched_rows=len(matched), endpoint="products.json"
-                ),
-                confidence="high",
-            ),
+        return _found(
+            question,
+            answer_payload,
+            "products.json",
+            lookup_field,
+            len(matched),
+            f"found {rec.get('name')} {lookup_field}={rec.get(lookup_field)}",
             ctx,
         )
 
@@ -244,24 +235,11 @@ def _lookup_product(
     target_idx = col_idx.get(lookup_field)
     if target_idx is None:
         return None
-    matched_rows = [r for r in snapshot.data.rows if name_idx < len(r) and _matches(r[name_idx], value, "exact")]
+    matched_rows = _match_exact_then_contains(
+        [r for r in snapshot.data.rows if name_idx < len(r)], lambda r: r[name_idx], value
+    )
     if not matched_rows:
-        lowered = value.lower()
-        matched_rows = [r for r in snapshot.data.rows if name_idx < len(r) and lowered in r[name_idx].lower()]
-    if not matched_rows:
-        return _freeze(
-            AnsweredQuestion(
-                question=question,
-                intent=QuestionIntent.LOOKUP,
-                not_found=True,
-                message=f"no product with name {value!r}",
-                evidence=AnswerEvidence(
-                    source="productTable", column=lookup_field, matched_rows=0, endpoint="productTable"
-                ),
-                confidence="high",
-            ),
-            ctx,
-        )
+        return _not_found(question, "product", value, "productTable", lookup_field, ctx)
     row = matched_rows[0]
     answer_payload = [
         {
@@ -269,16 +247,6 @@ def _lookup_product(
             lookup_field: row[target_idx].strip() if target_idx < len(row) else "",
         }
     ]
-    ctx.record("answer", "lookup", outcome=f"found {value} via table")
-    return _freeze(
-        AnsweredQuestion(
-            question=question,
-            intent=QuestionIntent.LOOKUP,
-            answer=answer_payload,
-            evidence=AnswerEvidence(
-                source="productTable", column=lookup_field, matched_rows=len(matched_rows), endpoint="productTable"
-            ),
-            confidence="high",
-        ),
-        ctx,
+    return _found(
+        question, answer_payload, "productTable", lookup_field, len(matched_rows), f"found {value} via table", ctx
     )

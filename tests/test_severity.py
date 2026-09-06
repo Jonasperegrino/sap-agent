@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from sap_agent.schemas import AccessibilityIssue, QaPageReport, QaReport, Severity, UxIssue
-from sap_agent.tools.qa import _align_severities
-from sap_agent.tools.severity import classify_issue
+from sap_agent.tools.qa import _align_severities, classify_issue
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sap_agent.cli import _build_parser, _resolve_config, _succeeded
+from sap_agent.cli import _build_parser, _resolve_config
+from sap_agent.cli_commands import _succeeded
 from sap_agent.schemas import StepResult, StepStatus
 
 if TYPE_CHECKING:
@@ -15,11 +16,6 @@ class TestBuildParser:
     def test_login_subcommand(self) -> None:
         args = _build_parser().parse_args(["login"])
         assert args.command == "login"
-
-    def test_ask_status_subcommand(self) -> None:
-        args = _build_parser().parse_args(["ask-status", "Approved"])
-        assert args.command == "ask-status"
-        assert args.status == "Approved"
 
     def test_ask_subcommand(self) -> None:
         args = _build_parser().parse_args(["ask", "how many orders?"])

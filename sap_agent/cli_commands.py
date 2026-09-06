@@ -24,10 +24,9 @@ from .schemas import (
     StepResult,
     StepStatus,
 )
-from .tools.answer import answer_count_by_status, evaluate_question
+from .tools.answer import evaluate_question
 from .tools.auth import AuthError, login
 from .tools.discover import discover_app
-from .tools.extract import get_table_data
 from .tools.qa import QA_ROUTES, run_qa, write_qa_report
 from .tools.report import classify_failure, collect_artifacts, should_retry, write_report
 from .ui import terminal
@@ -45,72 +44,6 @@ def cmd_login(config: Config) -> int:  # pragma: no cover
         try:
             result = login(page, config, _ctx)
             log_login(result, logger)
-            return 0
-        except AuthError as exc:
-            result = exc.result
-            log_auth_error(result, logger)
-            return 1
-
-
-def cmd_inspect(config: Config) -> int:  # pragma: no cover
-    with browser_session(config) as (page, capture, ctx):
-        try:
-            result = login(page, config, ctx)
-            log_login(result, logger)
-            table = get_table_data(page, timeout_ms=config.extract_timeout_ms)
-            captured_urls = capture.capture_response_urls()
-            payload = capture.latest_response_body("sales.json")
-            ctx.record(
-                "extract",
-                "table.dump",
-                outcome=f"columns={len(table.columns)} rows={table.row_count}",
-                url=page.url,
-            )
-            ctx.record(
-                "network",
-                "capture.summary",
-                outcome=f"same-origin responses: {len(captured_urls)}",
-            )
-            for url in captured_urls:
-                ctx.record("network", "capture.url", outcome="recorded", url=url)
-            summary = {
-                "table": table.to_dict(),
-                "captured_urls": captured_urls,
-                "sales_payload_matches_table": payload is not None,
-            }
-
-            print(json.dumps(summary, indent=2))
-            return 0
-        except AuthError as exc:
-            result = exc.result
-            log_auth_error(result, logger)
-            return 1
-
-
-def cmd_ask_status(config: Config, status: str) -> int:  # pragma: no cover
-    with browser_session(config) as (page, capture, ctx):
-        try:
-            result = login(page, config, ctx)
-            log_login(result, logger)
-            answered = answer_count_by_status(
-                page,
-                status,
-                ctx,
-                endpoint=config.app_url,
-            )
-            payload = {
-                "question": answered.question,
-                "answer": answered.answer,
-                "not_found": answered.not_found,
-                "unsupported": answered.unsupported,
-                "message": answered.message,
-                "evidence": answered.evidence.model_dump(),
-                "confidence": answered.confidence,
-                "checksum": answered.checksum,
-                "trace": ctx.snapshot(),
-                "captured_urls": capture.capture_response_urls(),
-            }
-            print(json.dumps(payload, indent=2))
             return 0
         except AuthError as exc:
             result = exc.result

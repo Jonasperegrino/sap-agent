@@ -9,8 +9,7 @@ Rules:
 
 Layout: shared helpers live in answer_core, aggregation in
 answer_aggregate, entity lookups in answer_lookup. This module keeps the
-orchestrator (evaluate_question + answer_count_by_status) and re-exports
-the helpers tests import.
+orchestrator evaluate_question.
 """
 
 from __future__ import annotations
@@ -24,32 +23,8 @@ from playwright.sync_api import Error as PlaywrightError
 from ..schemas import AnsweredQuestion, AnswerEvidence, IntentConfig, QuestionIntent
 from ..ui5.bridge import current_route
 from .answer_aggregate import _aggregate_top
-from .answer_core import (
-    _checksum as _checksum,
-)
-from .answer_core import (
-    _freeze,
-    _snapshot,
-    _wait_for_table_rows,
-    fetch_json_body,
-)
-from .answer_core import (
-    _infer_auto_route as _infer_auto_route,
-)
-from .answer_core import (
-    _matches as _matches,
-)
-from .answer_core import (
-    _normalize as _normalize,
-)
-from .answer_core import (
-    _parse_amount as _parse_amount,
-)
-from .answer_core import (
-    _resolve_json_key as _resolve_json_key,
-)
-from .answer_lookup import _lookup_customer as _lookup_customer
-from .answer_lookup import _lookup_product
+from .answer_core import _freeze, _infer_auto_route, _matches, _snapshot, _wait_for_table_rows, fetch_json_body
+from .answer_lookup import _lookup_customer, _lookup_product
 from .nav import navigate
 from .reason import parse_question, parse_question_with_llm
 
@@ -357,34 +332,4 @@ def evaluate_question(
         outcome=f"count={result.answer}",
         detail=f"matched {len(matched)} rows on {intent.column}={intent.value!r} ({intent.comparer})",
     )
-    return _freeze(result, ctx)
-
-
-def answer_count_by_status(
-    page: PageLike,
-    status: str,
-    ctx: SessionContext,
-    *,
-    column: str = "Status",
-    source: str = "salesTable",
-    endpoint: str | None = None,
-) -> AnsweredQuestion:
-    """Count rows whose `column` equals `status`, with evidence (legacy #651 entry)."""
-    question = f"how many rows have {column} = {status!r}"
-    result = evaluate_question(
-        page,
-        question,
-        ctx,
-        source=source,
-        endpoint=endpoint,
-        intent=IntentConfig(
-            intent=QuestionIntent.COUNT_WHERE,
-            column=column,
-            value=status,
-            comparer="exact",
-        ),
-    )
-    # legacy callers expect evidence.column == "Status" even when intent inferred
-    # differently; normalize the evidence column to the explicit argument
-    result.evidence.column = column
     return _freeze(result, ctx)

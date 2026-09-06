@@ -14,14 +14,9 @@ import logging
 import sys
 
 from .cli_commands import (
-    _succeeded as _succeeded,
-)
-from .cli_commands import (
     cmd_agent,
     cmd_ask,
-    cmd_ask_status,
     cmd_discover,
-    cmd_inspect,
     cmd_login,
     cmd_qa,
     cmd_report,
@@ -47,10 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("login", help="log in and verify session")
-    sub.add_parser("inspect", help="log in, capture network, dump table + trace")
     sub.add_parser("discover", help="log in and produce structured AppSummary JSON")
-    ask = sub.add_parser("ask-status", help="count rows by status with evidence")
-    ask.add_argument("status", help="status value to count (e.g. Approved)")
     askq = sub.add_parser("ask", help="answer a natural-language question")
     askq.add_argument("question", help="e.g. 'how many orders were built in 2026'")
     askq.add_argument(
@@ -107,12 +99,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     try:
         if args.command == "login":
             return cmd_login(config)
-        if args.command == "inspect":
-            return cmd_inspect(config)
         if args.command == "discover":
             return cmd_discover(config)
-        if args.command == "ask-status":
-            return cmd_ask_status(config, args.status)
         if args.command == "ask":
             return cmd_ask(config, args.question, route=args.route)
         if args.command == "report":

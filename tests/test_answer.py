@@ -7,8 +7,8 @@ import dataclasses
 from fakes import FakeLocator, PageStub
 
 from sap_agent.context import SessionContext
-from sap_agent.schemas import Config
-from sap_agent.tools.answer import answer_count_by_status
+from sap_agent.schemas import Config, IntentConfig, QuestionIntent
+from sap_agent.tools.answer import evaluate_question
 
 #: status cells as rendered by UI5 ObjectStatus (label + wrapper noise)
 ROWS: list[list[str]] = [
@@ -31,9 +31,21 @@ def _ctx() -> SessionContext:
     return SessionContext(Config(app_url="http://localhost:8080", username="demo", password="x"))
 
 
+def _count(page: FakePage, status: str, ctx: SessionContext, column: str = "Status"):
+    """Count rows via evaluate_question with an explicit COUNT_WHERE intent."""
+    result = evaluate_question(
+        page,
+        f"how many rows have {column} = {status!r}",
+        ctx,
+        intent=IntentConfig(intent=QuestionIntent.COUNT_WHERE, column=column, value=status, comparer="exact"),
+    )
+    result.evidence.column = column
+    return result
+
+
 class TestAnswerCountByStatusUnit:
     def test_counts_matching_status_with_evidence(self) -> None:
-        result = answer_count_by_status(FakePage(), "Approved", _ctx())
+        result = _count(FakePage(), "Approved", _ctx())
         assert result.answer == 2
         assert result.not_found is False
         assert result.evidence.source == "salesTable"
@@ -43,32 +55,32 @@ class TestAnswerCountByStatusUnit:
 
     def test_normalizes_object_status_noise(self) -> None:
         # label "Approved" must not be confused with the wrapper text
-        result = answer_count_by_status(FakePage(), "Approved", _ctx())
+        result = _count(FakePage(), "Approved", _ctx())
         assert result.answer == 2
-        not_found = answer_count_by_status(FakePage(), "Entry successfully validated", _ctx())
+        not_found = _count(FakePage(), "Entry successfully validated", _ctx())
         assert not_found.not_found is True
 
     def test_unknown_status_returns_not_found_no_crash(self) -> None:
-        result = answer_count_by_status(FakePage(), "Purple", _ctx())
+        result = _count(FakePage(), "Purple", _ctx())
         assert result.not_found is True
         assert result.answer is None
         assert result.evidence.matched_rows == 0
         assert "no rows" in result.message
 
     def test_unknown_column_returns_unsupported(self) -> None:
-        result = answer_count_by_status(FakePage(), "x", _ctx(), column="Nope")
+        result = _count(FakePage(), "x", _ctx(), column="Nope")
         assert result.unsupported is True
         assert result.answer is None
         assert "not present" in result.message
 
     def test_answer_cross_checked_against_table_rows(self) -> None:
-        result = answer_count_by_status(FakePage(), "Approved", _ctx())
+        result = _count(FakePage(), "Approved", _ctx())
         matched = sum(1 for row in ROWS if row[3].split("Object Status", 1)[0].strip() == "Approved")
         assert result.answer == matched == 2
 
     def test_identical_questions_produce_identical_checksum(self) -> None:
-        first = answer_count_by_status(FakePage(), "Approved", _ctx())
-        second = answer_count_by_status(FakePage(), "Approved", _ctx())
-        third = answer_count_by_status(FakePage(), "Approved", _ctx())
+        first = _count(FakePage(), "Approved", _ctx())
+        second = _count(FakePage(), "Approved", _ctx())
+        third = _count(FakePage(), "Approved", _ctx())
         assert first.model_dump() == second.model_dump() == third.model_dump()
         assert first.checksum == second.checksum == third.checksum

@@ -151,11 +151,3 @@ def test_post_json_posts_and_parses() -> None:
 
     with patch("sap_agent.tools.llm.urllib.request.urlopen", return_value=Resp()):
         assert _post_json("http://x", {}, {"a": 1}, 5.0) == {"ok": True}
-
-
-def test_trace_lines_serialize() -> None:
-    ctx = SessionContext(Config(app_url="http://x", username="u", password="p"))
-    ctx.record("tool", "action", "outcome")
-    lines = ctx.trace_lines()
-    assert len(lines) == 1
-    assert '"action"' in lines[0]

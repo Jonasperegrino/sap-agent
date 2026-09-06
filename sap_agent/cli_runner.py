@@ -9,9 +9,10 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from .browser import launch_args
+from .browser import launch_args, try_install_chromium
 from .context import SessionContext
 from .tools.network import NetworkCapture
 
@@ -27,7 +28,13 @@ if TYPE_CHECKING:
 def browser_session(config: Config) -> Iterator[tuple[PageLike, NetworkCapture, SessionContext]]:
     """Launch Chromium, yield (page, capture, ctx), always close the browser."""
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=config.headless, **launch_args())
+        try:
+            browser = pw.chromium.launch(headless=config.headless, **launch_args())
+        except PlaywrightError as exc:
+            if "Executable doesn't exist" not in str(exc) and "playwright install" not in str(exc):
+                raise
+            try_install_chromium()
+            browser = pw.chromium.launch(headless=config.headless, **launch_args())
         ctx = SessionContext(config)
         try:
             page = browser.new_page()

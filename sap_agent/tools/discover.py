@@ -9,7 +9,6 @@ Surfaces ranked by row count (primary data-bearing widgets first).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from playwright.sync_api import Error as PlaywrightError
@@ -78,12 +77,6 @@ def _detect_domain(title: str, columns: list[str]) -> str:
         if any(k in haystack for k in keywords):
             return domain
     return "unknown"
-
-
-@dataclass
-class DiscoverResult:
-    summary: AppSummary
-    matched_tables: int  # tables linked to a captured endpoint
 
 
 #: top-level routes the discovery walk visits (menu-driven)
@@ -165,20 +158,7 @@ def discover_app(
                     break
         discovered_tables.append(tbl)
 
-    # Controls were already accumulated per route during the walk (union, not
-    # last-page-only); refresh on the current page in case layout changed.
-    for txt in _visible_texts(page, FILTER_SELECTOR):
-        if txt not in filters:
-            filters.append(txt)
-    for txt in _visible_texts(page, FORM_SELECTOR):
-        if txt not in forms:
-            forms.append(txt)
-    for txt in _visible_texts(page, ACTION_SELECTOR):
-        if txt not in actions:
-            actions.append(txt)
-
-    entity_names: list[str] = []
-    entities: list[DiscoveredEntity] = []
+    by_name: dict[str, DiscoveredEntity] = {}
     for url in endpoints:
         body = capture.response_body(url)
         if not (isinstance(body, list) and body and isinstance(body[0], dict)):
@@ -186,17 +166,14 @@ def discover_app(
         name = _entity_from_endpoint(url)
         if url == app_url.rstrip("/") + "/" or not name:
             continue
-        if name not in entity_names:
-            entity_names.append(name)
-            linked = [t for t in discovered_tables if t.endpoint == url]
-            entities.append(DiscoveredEntity(name=name, tables=linked, endpoints=[url]))
-        else:
-            existing = next(e for e in entities if e.name == name)
-            if url not in existing.endpoints:
-                existing.endpoints.append(url)
-            for t in discovered_tables:
-                if t.endpoint == url and t not in existing.tables:
-                    existing.tables.append(t)
+        entity = by_name.get(name)
+        if entity is None:
+            entity = by_name[name] = DiscoveredEntity(name=name)
+        if url not in entity.endpoints:
+            entity.endpoints.append(url)
+        linked = [t for t in discovered_tables if t.endpoint == url and t not in entity.tables]
+        entity.tables.extend(linked)
+    entities = list(by_name.values())
 
     all_columns = [c for t in discovered_tables for c in t.columns]
     domain = _detect_domain(title, all_columns)

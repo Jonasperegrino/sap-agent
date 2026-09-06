@@ -30,6 +30,30 @@ if TYPE_CHECKING:
 
 QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
 
+_HIGH_TYPES = frozenset({"missing_alt", "missing_label"})
+
+_MEDIUM_TYPES = frozenset(
+    {
+        "heading_order",
+        "form_label",
+        "contrast",
+        "visual_hierarchy",
+        "spacing_inconsistency",
+        "alignment_issue",
+        "interaction_affordance",
+        "page_consistency",
+    }
+)
+
+
+def classify_issue(issue_type: str) -> Severity:
+    """Map an issue type to its severity (unknown types default to LOW)."""
+    if issue_type in _HIGH_TYPES:
+        return Severity.HIGH
+    if issue_type in _MEDIUM_TYPES:
+        return Severity.MEDIUM
+    return Severity.LOW
+
 
 def _performance_hints(page: PageLike) -> list[str]:
     hints: list[str] = []
@@ -58,8 +82,6 @@ def _performance_hints(page: PageLike) -> list[str]:
 
 def _align_severities(report: QaPageReport) -> None:
     """Re-grade every finding via #698 rules; script severities act as fallback."""
-    from .severity import classify_issue
-
     for issue in [*report.accessibility_issues, *report.ux_issues]:
         issue.severity = classify_issue(issue.type)
 
@@ -67,7 +89,7 @@ def _align_severities(report: QaPageReport) -> None:
 def _audit_page(page: PageLike, route: str, ctx: SessionContext, _capture: CaptureLike) -> QaPageReport:
     navigate(page, route, ctx.config.app_url, timeout_ms=ctx.config.nav_timeout_ms)
     # Viewport-only screenshots: full-page stitching is 2-4x slower and 5-10x
-    # larger per route; element-level detail stays available via capture_element.
+    # larger per route.
     screenshots = [capture_page(page, route, ctx, full_page=False)]
     a11y = audit_accessibility(page)
     ux = critique_ux(page)
@@ -111,17 +133,20 @@ def _consistency_check(sizes: dict[str, float]) -> dict[str, list[UxIssue]]:
     if len(sizes) < 2:
         return by_route
     values = [v for v in sizes.values() if v > 0]
-    if len(values) < 2 or median(values) == 0:
+    if len(values) < 2:
+        return by_route
+    mid = median(values)
+    if mid == 0:
         return by_route
     for route, size in sizes.items():
-        if size > 0 and abs(size - median(values)) / median(values) > 0.25:
+        if size > 0 and abs(size - mid) / mid > 0.25:
             by_route.setdefault(route, []).append(
                 UxIssue(
                     type="page_consistency",
                     element=f".sapMTitle on {route}",
                     severity=Severity.MEDIUM,
                     suggestion=(
-                        f"page-title font size varies ({size}px vs {int(median(values))}px median) "
+                        f"page-title font size varies ({size}px vs {int(mid)}px median) "
                         "across pages — use one type scale"
                     ),
                 )

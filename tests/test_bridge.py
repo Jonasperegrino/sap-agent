@@ -5,7 +5,7 @@ from __future__ import annotations
 from fakes import PageStub
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from sap_agent.ui5.bridge import current_route, has_login_form, wait_for_ui5_ready, welcome_text
+from sap_agent.ui5.bridge import current_route, has_login_form, wait_for_ui5_ready
 
 
 class FakePage(PageStub):
@@ -74,14 +74,3 @@ class TestHasLoginForm:
         page = FakePage()
         page._fail_selectors.add('input[placeholder="Username"]')
         assert has_login_form(page, timeout_ms=100) is False
-
-
-class TestWelcomeText:
-    def test_returns_stripped_text(self) -> None:
-        page = FakePage()
-        assert welcome_text(page) == "Welcome"
-
-    def test_returns_none_on_timeout(self) -> None:
-        page = FakePage()
-        page._fail_selectors.add(".sapMObjectHeaderTitle, .sapMOHTitle")
-        assert welcome_text(page, timeout_ms=100) is None

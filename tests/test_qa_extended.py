@@ -67,7 +67,7 @@ class TestAlignSeverities:
             accessibility_issues=[AccessibilityIssue(type="missing_alt", element="<img>", severity=Severity.LOW)],
         )
         _align_severities(report)
-        # missing_alt should be classified by severity.classify_issue
+        # missing_alt should be classified by qa.classify_issue
         assert report.accessibility_issues[0].severity in Severity
 
     def test_empty_report_no_crash(self) -> None:

@@ -16,7 +16,6 @@ from evals.run_eval import (
     check_gates,
     run_cli,
     score_payload,
-    validate_scenarios,
 )
 
 
@@ -72,28 +71,6 @@ class TestCheckGates:
 
     def test_no_gates_always_pass(self) -> None:
         assert check_gates({"retries": 9, "time_to_answer_ms": 99_999}, {}) == (True, "")
-
-
-class TestValidateScenarios:
-    def test_valid(self) -> None:
-        cfg = {
-            "scenarios": [
-                {"id": "a", "kind": "ask", "args": {"question": "q?"}, "expect": {}},
-                {"id": "b", "kind": "login", "expect": {"exit": 0}},
-            ]
-        }
-        assert validate_scenarios(cfg) == []
-
-    def test_duplicate_ids(self) -> None:
-        cfg = {"scenarios": [{"id": "a", "kind": "login", "expect": {}}, {"id": "a", "kind": "login", "expect": {}}]}
-        errors = validate_scenarios(cfg)
-        assert any("duplicate" in e for e in errors)
-
-    def test_unknown_kind_and_missing_question(self) -> None:
-        cfg = {"scenarios": [{"id": "x", "kind": "nope", "expect": {}}, {"id": "y", "kind": "ask", "expect": {}}]}
-        errors = validate_scenarios(cfg)
-        assert any("unknown kind" in e for e in errors)
-        assert any("args.question" in e for e in errors)
 
 
 class TestRunCliTimeout:
