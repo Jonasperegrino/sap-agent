@@ -8,8 +8,12 @@ from pathlib import Path
 
 import streamlit as st
 
-from sap_agent.schemas import Config
-from sap_agent.ui.service import RunResult, run_question
+# Must be the first Streamlit call — anything before it (even a cached
+# function) can leave the page as a blank black screen.
+st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
+
+from sap_agent.schemas import Config  # noqa: E402
+from sap_agent.ui.service import RunResult, run_question  # noqa: E402
 
 # Streamlit Cloud captures stdout/stderr into the app logs — plain
 # basicConfig is the whole integration: every module logger flows there.
@@ -28,8 +32,8 @@ except (RuntimeError, OSError, AttributeError, ValueError, TypeError, KeyError) 
 
 
 # Ensure Chromium is installed for Playwright (Streamlit Cloud post-install).
-# Cached: without this every keystroke-rerun re-globs the filesystem and can
-# spawn 180s install probes at import time.
+# Lazy: only checked on first agent run, never at import — a blocking install
+# at import time stalls the first render (blank black page / health timeout).
 @st.cache_resource(show_spinner=False)
 def _chromium_ready() -> bool:
     import pathlib as _pl2
@@ -47,13 +51,52 @@ def _chromium_ready() -> bool:
     return any(_b.exists() and any(_b.glob("chromium*")) for _b in bases)
 
 
-with contextlib.suppress(RuntimeError, OSError, AttributeError):
-    _chromium_ready()
+# Styled dark theme matching .streamlit/config.toml. No remote @import
+# (render-blocking on Cloud) and no url(none) fallback — background-image
+# is only emitted when the asset actually loads.
+@st.cache_resource(show_spinner=False)
+def _load_bg() -> str:
+    for _bp in [
+        Path(__file__).parent / "assets" / "worldmap_small.jpg",
+        Path(__file__).resolve().parent / "assets" / "worldmap_small.jpg",
+        Path.cwd() / "sap_agent" / "ui" / "assets" / "worldmap_small.jpg",
+    ]:
+        if _bp.exists():
+            try:
+                import base64
 
-st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
+                return base64.b64encode(_bp.read_bytes()).decode()
+            except (OSError, ValueError):
+                continue
+    return ""
 
-st.title("Atlas for SAP")
-st.caption("Autonomous SAP Fiori discovery & Q&A agent")
+
+@st.cache_data(show_spinner=False)
+def _make_css(bg_b64: str) -> str:
+    bg_rule = (
+        f" background-image: url(data:image/jpeg;base64,{bg_b64});"
+        " background-size: cover; background-position: center;"
+        " background-repeat: no-repeat;"
+        if bg_b64
+        else ""
+    )
+    return (
+        "<style>"
+        "[data-testid='stAppViewContainer'] { background-color: #0a0f1a;"
+        + bg_rule
+        + " color: #e2e8f0; min-height: 100vh; }"
+        "[data-testid='stSidebar'] { background: #0f172a; }"
+        ".atlas-title { font-size: 2.8rem; font-weight: 800; text-align: center; "
+        "background: linear-gradient(135deg, #00d4ff 0%, #00ff88 100%); "
+        "-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }"
+        ".atlas-sub { color: #94a3b8; text-align: center; margin-bottom: 1.5rem; }"
+        "</style>"
+    )
+
+
+st.markdown(_make_css(_load_bg()), unsafe_allow_html=True)
+st.markdown('<div class="atlas-title">Atlas for SAP</div>', unsafe_allow_html=True)
+st.markdown('<div class="atlas-sub">Autonomous SAP Fiori discovery & Q&A agent</div>', unsafe_allow_html=True)
 
 if "last_result" not in st.session_state:
     st.session_state["last_result"] = None
@@ -145,6 +188,8 @@ with tab_ask:
             try:
                 with st.status("Running agent…", expanded=True) as status:
                     st.write("Logging in…")
+                    with contextlib.suppress(RuntimeError, OSError, AttributeError):
+                        _chromium_ready()
                     res = run_question(cfg, question.strip(), None)
                     st.write("Rendering answer…")
                     status.update(label="Agent run complete", state="complete")
