@@ -13,6 +13,9 @@ dependencies = [
 [project.scripts]
 fiori-agent = "sap_agent.cli:main"
 
+[tool.setuptools.packages.find]
+exclude = ["evals*"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
@@ -21,7 +24,8 @@ dev = [
     "ruff>=0.8",
     "ty>=0.0.1",
 ]
-
+[tool.uv]
+package = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

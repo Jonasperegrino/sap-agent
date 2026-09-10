@@ -1,3 +1,13 @@
+Metadata-Version: 2.4
+Name: sap-agent
+Version: 0.1.0
+Summary: SAP Fiori autonomous discovery and Q&A agent
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: playwright>=1.48
+Requires-Dist: pydantic>=2.9
+Requires-Dist: streamlit>=1.62.0
+
 # SAP Fiori Discovery Agent
 
 Autonomous agent over a SAP Fiori / UI5 app: discovers pages + data, answers questions with typed evidence, audits accessibility/UX across every route, and files reproducible bug reports. Deterministic-by-default; LLM is an optional fallback.
@@ -69,13 +79,7 @@ agent/
 
 ## Deployment
 
-- **Agent — Streamlit Cloud**: `streamlit_app.py` is the entrypoint. Connect repo, set Python 3.12, secrets `SAP_AGENT_URL=https://jonasperegrino.github.io/sap-fiori/` (default), `SAP_AGENT_USER`/`PASSWORD`.
-
-Cloud install notes:
-- Include `requirements.txt` (or uv.lock) and add a `packages.txt` at the repo root listing OS packages required for Playwright (an example `packages.txt` is included).
-- In the Streamlit Cloud app settings, set the "Setup command" to: `.streamlit/setup.sh` (this runs `python -m playwright install chromium`).
-
-Local: `uv run streamlit run streamlit_app.py` or `make ui`.
+- **Agent — Streamlit Cloud**: `streamlit_app.py` is the entrypoint. Connect repo, set Python 3.12, secrets `SAP_AGENT_URL=https://jonasperegrino.github.io/sap-fiori/` (default), `SAP_AGENT_USER`/`PASSWORD`. Cloud installs via `requirements.txt` + `packages.txt` (chromium deps) and `playwright install chromium` on first run. Local: `uv run streamlit run streamlit_app.py` or `make ui`.
 - **Fiori app**: live at `https://jonasperegrino.github.io/sap-fiori/` (GitHub Pages, repo `../sap-fiori`). Local fallback: `../fiori-app` or `FIORI_APP_DIR` for `make vendor-ui5` / `make demo` / `docker-up`.
 - **Env**: `SAP_AGENT_LLM_*` optional for NL aggregate questions.
 
