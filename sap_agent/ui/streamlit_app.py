@@ -34,9 +34,14 @@ except (RuntimeError, OSError, AttributeError, ValueError, TypeError, KeyError) 
 # Ensure Chromium is installed for Playwright (Streamlit Cloud post-install).
 # Lazy: only checked on first agent run, never at import — a blocking install
 # at import time stalls the first render (blank black page / health timeout).
-@st.cache_resource(show_spinner=False)
 def _chromium_ready() -> bool:
+    """Non-blocking check for Playwright Chromium. If missing, start a
+    background installer thread and return False immediately so the UI stays
+    responsive. Subsequent calls re-check existence and will return True once
+    the browser is available.
+    """
     import pathlib as _pl2
+    import threading
 
     from sap_agent.browser import try_install_chromium
 
@@ -47,8 +52,25 @@ def _chromium_ready() -> bool:
     ]
     if any(_b.exists() and any(_b.glob("chromium*")) for _b in bases):
         return True
-    try_install_chromium()
-    return any(_b.exists() and any(_b.glob("chromium*")) for _b in bases)
+
+    # Start installer in background once to avoid blocking the Streamlit thread.
+    if not getattr(_chromium_ready, "_installer_started", False):
+
+        def _install():
+            try:
+                try_install_chromium()
+            except Exception:
+                # Installer failures are non-fatal for the UI; errors are logged
+                # by the installer or its caller.
+                return
+
+        t = threading.Thread(target=_install, daemon=True)
+        t.start()
+        from typing import Any, cast
+
+        cast("Any", _chromium_ready)._installer_started = True
+
+    return False
 
 
 # Styled dark theme matching .streamlit/config.toml. No remote @import
