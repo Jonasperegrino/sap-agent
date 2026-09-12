@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from ..browser import launch_args, try_install_chromium
+from ..browser import launch_args
 from ..context import SessionContext
 from ..tools.answer import evaluate_question
 from ..tools.auth import AuthError, login
@@ -76,24 +76,32 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
         return _run_once()
     except (PlaywrightError, OSError, TimeoutError) as exc:
         msg = str(exc)
+        # Fail fast when the browser binary is missing. Installing here
+        # (`playwright install` downloads ~150MB synchronously) blocks the
+        # Streamlit session for minutes with no progress, which drops the
+        # websocket and blanks the page. The binary must come from build
+        # time (.streamlit/setup.sh); the UI gates on _chromium_ready so
+        # this path should only fire when provisioning failed.
         if "Executable doesn't exist" in msg or "playwright install" in msg:
-            logger.warning("browser missing, attempting playwright install: %s", msg[:200])
-            try_install_chromium()
-            try:
-                return _run_once()
-            except (PlaywrightError, OSError, TimeoutError):
-                pass
-        # fallback — browser never started, no screenshot possible
+            logger.error("browser binary missing: %s", msg[:300])
+            detail = (
+                "Browser binary missing — Chromium provisioning failed. "
+                "Redeploy so `.streamlit/setup.sh` installs it at build time, "
+                "then retry."
+            )
+        else:
+            detail = msg[:300]
+            # fallback — browser never started, no screenshot possible
+            logger.error("agent run failed without browser: %s", detail)
         from sap_agent.schemas import BugReport
 
-        logger.error("agent run failed without browser: %s", msg[:300])
         report = BugReport(
             title=f"Agent failure — {config.app_url}",
-            actual=msg[:300],
+            actual=detail,
             artifacts=[],
             trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
         )
-        return RunResult(report=report, trace=ctx.snapshot(), error=msg[:300])
+        return RunResult(report=report, trace=ctx.snapshot(), error=detail)
 
 
 def _failure_result(page: Any, ctx: SessionContext, kind: str, detail: str) -> RunResult:

@@ -1,25 +1,27 @@
-"""Shared Chromium launch helpers (perf B1).
+"""Shared Chromium launch helpers.
 
-Every CLI command and the Streamlit service used to launch Chromium with
-bare `headless=` only, so sandboxed envs (Streamlit Cloud, Docker as root)
-paid a retry loop or a hard crash. This module is the single source for
-launch kwargs; per-command `browser.new_page()` reuse stays next (pool).
+Every CLI command and the Streamlit service launch Chromium through
+`launch_args()`. Sandboxed envs (Streamlit Cloud, Docker as root) refuse
+to start Chromium without `--no-sandbox`, and small `/dev/shm` (Cloud,
+containers) crashes renderers without `--disable-dev-shm-usage` — both
+hard-fail the whole agent run. The flags are harmless on a local desktop,
+so they apply unconditionally: gating them behind env-var detection meant
+a host that set none of the vars silently launched with bare `headless=`.
 """
 
 from __future__ import annotations
 
-import os
-
 
 def launch_args() -> dict:
-    """Chromium args for sandboxed / low-shm envs."""
-    if (
-        os.environ.get("SAP_AGENT_NO_SANDBOX", "").lower() in {"1", "true", "yes"}
-        or os.environ.get("STREAMLIT_RUNTIME")
-        or os.environ.get("STREAMLIT_CLOUD")
-    ):
-        return {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
-    return {}
+    """Chromium args safe for sandboxed / low-shm envs and local dev."""
+    return {
+        "args": [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+        ]
+    }
 
 
 #: install commands tried in order when the browser binary is missing

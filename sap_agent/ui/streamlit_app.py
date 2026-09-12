@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
@@ -66,7 +66,7 @@ def _chromium_ready() -> bool:
 
         t = threading.Thread(target=_install, daemon=True)
         t.start()
-        from typing import Any, cast
+        from typing import cast
 
         cast("Any", _chromium_ready)._installer_started = True
 
@@ -128,7 +128,9 @@ with st.sidebar:
     import os as _os
 
     _default_url = _os.environ.get("SAP_AGENT_URL", "https://jonasperegrino.github.io/sap-fiori/")
-    _env_password = _os.environ.get("SAP_AGENT_PASSWORD", "")
+    # Demo default so the app works out of the box; env/Cloud secrets override it,
+    # and clearing the field still triggers the "enter password" warning.
+    _env_password = _os.environ.get("SAP_AGENT_PASSWORD", "") or "password123"
     # Form batches sidebar edits: without it every keystroke reruns the app.
     with st.form("connection"):
         app_url = st.text_input("App URL", value=_default_url)
@@ -188,6 +190,13 @@ with tab_ask:
             st.warning("Enter a question before asking.")
         elif not password:
             st.warning("Enter the demo password in the sidebar (demo: password123).")
+        elif not _chromium_ready():
+            # Never start a run while the binary is still provisioning: the
+            # launch would fail (or worse, trigger a minutes-long blocking
+            # install) and the tab would blank with no feedback.
+            st.warning(
+                "Browser is still provisioning (Chromium downloads on first start). Wait ~30s and press Ask again."
+            )
         else:
             cfg = Config.from_env(app_url=app_url, username=username, password=password)
             # Fast single-attempt mode for interactive use (full budgets stay in CLI).
@@ -210,8 +219,11 @@ with tab_ask:
             try:
                 with st.status("Running agent…", expanded=True) as status:
                     st.write("Logging in…")
-                    with contextlib.suppress(RuntimeError, OSError, AttributeError):
-                        _chromium_ready()
+                    # Direct call on the script thread: run_question drives
+                    # Playwright's sync API, which hangs when moved to a bare
+                    # worker thread inside the server process (no browser ever
+                    # spawns). Worst case is bounded (~40s) by the login / nav
+                    # / extract / LLM timeouts, so no timeout wrapper is needed.
                     res = run_question(cfg, question.strip(), None)
                     st.write("Rendering answer…")
                     status.update(label="Agent run complete", state="complete")
