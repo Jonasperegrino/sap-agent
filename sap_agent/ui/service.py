@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from ..browser import launch_args
+from ..browser import LAUNCH_CRASH_HINT, is_launch_crash, launch_args
 from ..context import SessionContext
 from ..tools.answer import evaluate_question
 from ..tools.auth import AuthError, login
@@ -41,9 +41,25 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
     logger.info("agent question (route=%s): %s", route, question)
     ctx = SessionContext(config)
 
+    def _launch(pw: Any) -> Any:
+        """Launch Chromium, retrying once in low-memory mode after a startup crash."""
+        try:
+            return pw.chromium.launch(headless=config.headless, **launch_args())
+        except (PlaywrightError, OSError) as exc:
+            if not is_launch_crash(exc):
+                raise
+            logger.warning("chromium launch crashed, retrying low-memory fallback: %s", str(exc)[:150])
+            return pw.chromium.launch(headless=config.headless, **launch_args(low_memory_fallback=True))
+
     def _run_once() -> RunResult:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=config.headless, **launch_args())
+            try:
+                browser = _launch(pw)
+            except (PlaywrightError, OSError) as exc:
+                if is_launch_crash(exc):
+                    logger.error("chromium launch crash: %s", str(exc)[:300])
+                    return _failure_result(None, ctx, "agent_limitation", LAUNCH_CRASH_HINT)
+                raise
             page = browser.new_page()
             capture = NetworkCapture(page, config.app_url)
             try:
