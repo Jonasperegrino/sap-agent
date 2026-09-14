@@ -1,8 +1,3 @@
-# System deps for Playwright Chromium (headless shell) on Streamlit Cloud (Debian).
-# An incomplete set crashes launch with:
-#   BrowserType.launch: Target page, context or browser has been closed
-# NOTE: Cloud only applies packages.txt on reboot/redeploy — after editing,
-# redeploy the app (or Reboot in Manage app) or the crash persists.
 libnss3
 libnspr4
 libatk-bridge2.0-0
