@@ -120,11 +120,22 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
         return RunResult(report=report, trace=ctx.snapshot(), error=detail)
 
 
-def _failure_result(page: Any, ctx: SessionContext, kind: str, detail: str) -> RunResult:
+def _failure_result(page: Any | None, ctx: SessionContext, kind: str, detail: str) -> RunResult:
     """Collect and persist a secret-free report for a failed run."""
-    report = collect_artifacts(page, ctx)
+    if page is None:
+        # Browser never started (launch crash) — no screenshot possible.
+        from sap_agent.schemas import BugReport
+
+        report = BugReport(
+            title=f"Agent failure ({kind}) — {ctx.config.app_url}",
+            actual=detail,
+            artifacts=[],
+            trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
+        )
+    else:
+        report = collect_artifacts(page, ctx)
+        report.title = f"Agent failure ({kind}) — {ctx.config.app_url}"
+        report.actual = detail or report.actual
     report.classification = classify_failure(kind)
-    report.title = f"Agent failure ({kind}) — {ctx.config.app_url}"
-    report.actual = detail or report.actual
     path = write_report(report, ctx)
     return RunResult(report=report, report_path=path, trace=ctx.snapshot(), error=detail)
