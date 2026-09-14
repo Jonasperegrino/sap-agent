@@ -11,11 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: prelude that makes ANY playwright import fail, simulating a broken/missing
 #: browser dependency on the server.
-BLOCK_PLAYWRIGHT = (
-    "import sys; "
-    "sys.modules['playwright'] = None; "
-    "sys.modules['playwright.sync_api'] = None; "
-)
+BLOCK_PLAYWRIGHT = "import sys; sys.modules['playwright'] = None; sys.modules['playwright.sync_api'] = None; "
 
 
 def _run(code: str) -> subprocess.CompletedProcess[str]:
@@ -49,10 +45,7 @@ def test_run_question_degrades_without_playwright() -> None:
 
 
 def test_streamlit_app_boots_without_playwright() -> None:
-    proc = _run(
-        "import runpy; runpy.run_path('streamlit_app.py', run_name='__main__'); "
-        "print('boot ok')"
-    )
+    proc = _run("import runpy; runpy.run_path('streamlit_app.py', run_name='__main__'); print('boot ok')")
     assert proc.returncode == 0, proc.stderr
     assert "Traceback" not in proc.stderr
     assert "boot ok" in proc.stdout
