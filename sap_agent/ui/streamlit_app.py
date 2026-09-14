@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import streamlit as st
 
@@ -12,13 +12,34 @@ import streamlit as st
 # function) can leave the page as a blank black screen.
 st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
 
-from sap_agent.schemas import Config  # noqa: E402
-from sap_agent.ui.service import RunResult, run_question  # noqa: E402
+logger = logging.getLogger("fiori-agent")
+
+if TYPE_CHECKING:
+    # Type-only alias: at runtime Config may be the model or an Any stub.
+    from sap_agent.schemas import Config as ConfigModel
+
+# The agent engine (playwright + browser stack) must NEVER take the UI down:
+# if it fails to import, the page still renders and Ask degrades to an
+# inline error. Importing it unguarded turned a browser problem into a
+# full-page "Oh no" outage.
+_ENGINE_ERROR = ""
+try:
+    from sap_agent.schemas import Config
+    from sap_agent.ui.service import RunResult, run_question
+except Exception as exc:
+    logger.warning("agent engine unavailable, UI running degraded: %s", exc)
+    Config: Any = Any
+    RunResult: Any = Any
+
+    _ENGINE_ERROR = f"{type(exc).__name__}: {exc}"[:200]
+
+    def run_question(*args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        raise RuntimeError(f"Agent engine unavailable: {_ENGINE_ERROR}")
+
 
 # Streamlit Cloud captures stdout/stderr into the app logs — plain
 # basicConfig is the whole integration: every module logger flows there.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("fiori-agent")
 
 # Streamlit Cloud: inject secrets into env so Config.from_env picks them up
 try:
@@ -186,7 +207,13 @@ with tab_ask:
     )
     ask = st.button("Ask the agent", type="primary", use_container_width=True, key="ask_btn")
     if ask:
-        if not question.strip():
+        if _ENGINE_ERROR:
+            st.error(
+                "Agent engine failed to load on the server "
+                f"({_ENGINE_ERROR}). The page itself is fine — check the "
+                "deployment logs or redeploy, then retry."
+            )
+        elif not question.strip():
             st.warning("Enter a question before asking.")
         elif not password:
             st.warning("Enter the demo password in the sidebar (demo: password123).")
@@ -198,7 +225,8 @@ with tab_ask:
                 "Browser is still provisioning (Chromium downloads on first start). Wait ~30s and press Ask again."
             )
         else:
-            cfg = Config.from_env(app_url=app_url, username=username, password=password)
+            # ConfigModel: Config is the real model here (_ENGINE_ERROR gates the stub).
+            cfg = cast("ConfigModel", Config).from_env(app_url=app_url, username=username, password=password)
             # Fast single-attempt mode for interactive use (full budgets stay in CLI).
             cfg.login_timeout_ms = 8000
             cfg.retry_budget = 1
@@ -234,7 +262,8 @@ with tab_ask:
                 else:
                     st.error(f"Agent crashed: {e}")
 
-    res: RunResult | None = st.session_state.get("last_result")
+    # RunResult | None — untyped so the page renders even with a stubbed engine.
+    res = st.session_state.get("last_result")
     if res and res.answer:
         a = res.answer
         _llm_used = any("llm" in str(t.get("tool", "")) + str(t.get("action", "")) for t in (res.trace or []))

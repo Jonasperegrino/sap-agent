@@ -1,25 +1,24 @@
-"""Streamlit-facing orchestration for one isolated agent run."""
+"""Streamlit-facing orchestration for one isolated agent run.
+
+Import-safe by design: NOTHING in this module may import playwright (or any
+module that does) at top level. The Streamlit page imports this module on
+every boot — a hard browser dependency here turns any browser problem into
+a full-page outage. All engine imports happen lazily inside `run_question()`
+and degrade to an in-UI error result instead of raising.
+"""
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
-
 from ..browser import LAUNCH_CRASH_HINT, is_launch_crash, launch_args
-from ..context import SessionContext
-from ..tools.answer import evaluate_question
-from ..tools.auth import AuthError, login
-from ..tools.network import NetworkCapture
-from ..tools.report import classify_failure, collect_artifacts, write_report
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..context import SessionContext
     from ..schemas import AnsweredQuestion, BugReport, Config
 
 logger = logging.getLogger("fiori-agent")
@@ -36,8 +35,44 @@ class RunResult:
     error: str = ""
 
 
+def _engine_result(app_url: str, detail: str) -> RunResult:
+    """Build a no-browser failure result (engine missing, never started)."""
+    from ..schemas import BugReport
+
+    report = BugReport(
+        title=f"Agent failure — {app_url}",
+        actual=detail,
+        artifacts=[],
+        trace_tail=[],
+    )
+    return RunResult(report=report, trace=[], error=detail)
+
+
 def run_question(config: Config, question: str, route: str | None = None) -> RunResult:
-    """Answer a question and automatically draft a report when the run fails."""
+    """Answer a question and automatically draft a report when the run fails.
+
+    Never raises for engine problems (missing playwright, dead browser):
+    those become error results the UI renders inline.
+    """
+    import contextlib
+
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+
+        from ..context import SessionContext
+        from ..tools.answer import evaluate_question
+        from ..tools.auth import AuthError, login
+        from ..tools.network import NetworkCapture
+    except ImportError as exc:
+        logger.error("agent engine unavailable: %s", exc)
+        return _engine_result(
+            config.app_url,
+            "Agent engine unavailable — the browser library failed to load "
+            f"on the server ({exc}). The UI is fine; check the deployment logs "
+            "or redeploy, then retry.",
+        )
+
     logger.info("agent question (route=%s): %s", route, question)
     ctx = SessionContext(config)
 
@@ -109,22 +144,16 @@ def run_question(config: Config, question: str, route: str | None = None) -> Run
             detail = msg[:300]
             # fallback — browser never started, no screenshot possible
             logger.error("agent run failed without browser: %s", detail)
-        from sap_agent.schemas import BugReport
-
-        report = BugReport(
-            title=f"Agent failure — {config.app_url}",
-            actual=detail,
-            artifacts=[],
-            trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
-        )
-        return RunResult(report=report, trace=ctx.snapshot(), error=detail)
+        return _engine_result(config.app_url, detail)
 
 
 def _failure_result(page: Any | None, ctx: SessionContext, kind: str, detail: str) -> RunResult:
     """Collect and persist a secret-free report for a failed run."""
+    from ..tools.report import classify_failure, collect_artifacts, write_report
+
     if page is None:
         # Browser never started (launch crash) — no screenshot possible.
-        from sap_agent.schemas import BugReport
+        from ..schemas import BugReport
 
         report = BugReport(
             title=f"Agent failure ({kind}) — {ctx.config.app_url}",
