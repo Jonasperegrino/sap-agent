@@ -143,7 +143,7 @@ def cmd_qa(config: Config, no_color: bool = False, fmt: str | None = None) -> in
         try:
             result = login(page, config, ctx)
             log_login(result, logger)
-            steps_total = len(QA_ROUTES) + 2  # login + dashboard/catalog/orders/customer
+            steps_total = len(QA_ROUTES) + 2  # login + routes + customer drill-down
             if fmt is None:
                 terminal.print_step(1, steps_total, "login ok — auditing app now")
 

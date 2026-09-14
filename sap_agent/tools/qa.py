@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from ..context import SessionContext
     from ..protocols import CaptureLike, PageLike
 
-QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
+QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders", "settings")
 
 _HIGH_TYPES = frozenset({"missing_alt", "missing_label"})
 
@@ -166,7 +166,7 @@ def run_qa(
     """Audit every route; returns the assembled QaReport."""
     title_sizes: dict[str, float] = {}
     pages: list[QaPageReport] = []
-    steps_total = len(QA_ROUTES) + 1  # 4 routes + customer drill-down
+    steps_total = len(QA_ROUTES) + 1  # routes + customer drill-down
 
     for index, route in enumerate(QA_ROUTES):
         if progress:

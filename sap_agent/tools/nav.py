@@ -23,6 +23,7 @@ NAV_BUTTON_TEXTS: dict[str, str] = {
     "customers": "Customers",
     "catalog": "Catalog",
     "orders": "Order History",
+    "settings": "Settings",
 }
 
 #: expected page-header title per route — only the rendered page title proves
@@ -33,6 +34,7 @@ PAGE_TITLES: dict[str, str] = {
     "catalog": "Product Catalog",
     "orders": "Order History",
     "customer": "Customer Details",
+    "settings": "Settings",
 }
 
 
@@ -48,7 +50,11 @@ def navigate(page: PageLike, route: str, app_url: str, timeout_ms: int = 10_000)
 
     label = NAV_BUTTON_TEXTS.get(route)
     if label is not None:
-        button = page.locator(f"button:has-text('{label}')").first
+        # :visible — UI5 keeps previous views in the DOM, so a bare
+        # :has-text match also hits stale hidden navbars and the click
+        # either times out or navigates from a dead view (leaving two
+        # pages visible at once).
+        button = page.locator(f"button:has-text('{label}'):visible").first
         try:
             button.click(timeout=timeout_ms)
         except PlaywrightTimeoutError:
@@ -83,7 +89,7 @@ def _wait_for_route_and_title(page: PageLike, expected: str, title: str | None, 
                         getComputedStyle(t).visibility !== 'hidden'
                 )
                 .map((t) => t.textContent || '');
-            const settleOk = Array.from(document.querySelectorAll('.sapMListTbl'))
+            const settleOk = Array.from(document.querySelectorAll('.sapMPage'))
                 .filter((e) => e.offsetParent !== null).length <= 1;
             return titles.some((text) => text.includes(title)) && settleOk;
         }"""
@@ -99,13 +105,15 @@ def _wait_for_route_and_title(page: PageLike, expected: str, title: str | None, 
 
 
 def _wait_for_view_settle(page: PageLike, timeout_ms: int) -> None:
-    """Wait until the view swap finished (≤1 visible table in the DOM).
+    """Wait until the view swap finished (≤1 visible page in the DOM).
 
     During the UI5 page transition the incoming and the outgoing view are both
     visible at once; table reads during that window can hit the stale page.
+    Pages (not tables) are counted so table-less views like Settings settle
+    correctly too.
     """
     page.wait_for_function(
-        "() => Array.from(document.querySelectorAll('.sapMListTbl')).filter(e => e.offsetParent !== null).length <= 1",
+        "() => Array.from(document.querySelectorAll('.sapMPage')).filter(e => e.offsetParent !== null).length <= 1",
         timeout=timeout_ms,
     )
 

@@ -80,7 +80,7 @@ def _detect_domain(title: str, columns: list[str]) -> str:
 
 
 #: top-level routes the discovery walk visits (menu-driven)
-_WALK_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders")
+_WALK_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders", "settings")
 
 
 def _walk_tables(page: PageLike, app_url: str) -> tuple[list[TableData], list[str], list[str], list[str], list[str]]:

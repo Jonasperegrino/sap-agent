@@ -48,7 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     askq.add_argument(
         "--route",
         default=None,
-        help="top-level page to answer against: dashboard | customers | catalog | orders | customer (default: current page)",  # noqa: E501
+        help="top-level page to answer against: dashboard | customers | catalog | orders | settings | customer (default: current page)",  # noqa: E501
     )
     sub.add_parser("report", help="attempt login; on failure draft a bug report")
     qa = sub.add_parser("qa", help="run the full QA audit across every page (screenshot, a11y, UX)")
