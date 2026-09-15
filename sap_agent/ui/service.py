@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,7 @@ from playwright.sync_api import sync_playwright
 
 from ..browser import launch_args, try_install_chromium
 from ..context import SessionContext
+from ..schemas import BugReport, FailureClass
 from ..tools.answer import evaluate_question
 from ..tools.auth import AuthError, login
 from ..tools.network import NetworkCapture
@@ -20,7 +22,7 @@ from ..tools.report import classify_failure, collect_artifacts, write_report
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ..schemas import AnsweredQuestion, BugReport, Config
+    from ..schemas import AnsweredQuestion, Config
 
 logger = logging.getLogger("fiori-agent")
 
@@ -34,6 +36,42 @@ class RunResult:
     report_path: Path | None = None
     trace: list[dict[str, Any]] | None = None
     error: str = ""
+
+
+def report_nonfunctional_button(config: Config, button_label: str) -> RunResult:
+    """Create a product-bug report for an intentionally dead demo button."""
+    ctx = SessionContext(config)
+    ctx.record("ui", "demo.button.click", "clicked", url=config.app_url, detail=button_label)
+    ctx.record(
+        "qa",
+        "demo.nonfunctional_button",
+        "detected",
+        url=config.app_url,
+        detail=f"{button_label} produced no visible effect",
+    )
+    report = BugReport(
+        title=f"Non-functional button detected — {button_label}",
+        expected=f"clicking '{button_label}' opens the requested feature",
+        actual=f"clicking '{button_label}' produced no visible state change, route change, or feature output",
+        classification=FailureClass.PRODUCT_BUG,
+        reproduction_steps=[
+            f"open Atlas for SAP at {config.app_url}",
+            f"click '{button_label}' in the bug detection demo area",
+            "observe that no panel, dialog, route, or result appears",
+            "review the generated bug report",
+        ],
+        environment={
+            "app_url": config.app_url,
+            "surface": "Atlas for SAP demo UI",
+            "browser": "streamlit",
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+        },
+        artifacts=[],
+        trace_tail=[e.model_dump_json() for e in ctx.trace[-10:]],
+    )
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    path = write_report(report, ctx, name=f"bug_report_{stamp}.md")
+    return RunResult(report=report, report_path=path, trace=ctx.snapshot(), error=report.actual)
 
 
 def run_question(config: Config, question: str, route: str | None = None) -> RunResult:

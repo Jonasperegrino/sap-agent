@@ -13,7 +13,7 @@ import streamlit as st
 st.set_page_config(page_title="Atlas for SAP", page_icon="🌍", layout="wide")
 
 from sap_agent.schemas import Config  # noqa: E402
-from sap_agent.ui.service import RunResult, run_question  # noqa: E402
+from sap_agent.ui.service import RunResult, report_nonfunctional_button, run_question  # noqa: E402
 
 # Streamlit Cloud captures stdout/stderr into the app logs — plain
 # basicConfig is the whole integration: every module logger flows there.
@@ -100,6 +100,8 @@ st.markdown('<div class="atlas-sub">Autonomous SAP Fiori discovery & Q&A agent</
 
 if "last_result" not in st.session_state:
     st.session_state["last_result"] = None
+if "selected_report_name" not in st.session_state:
+    st.session_state["selected_report_name"] = None
 
 with st.sidebar:
     st.header("Connection")
@@ -155,6 +157,16 @@ with st.sidebar:
 tab_ask, tab_reports = st.tabs(["Ask", "Reports"])
 
 with tab_ask:
+    st.subheader("Forecast")
+    st.caption("Open the forecast panel for projected order insights.")
+    if st.button("Open Forecast Panel", use_container_width=True, key="dead_button_demo"):
+        cfg = Config.from_env(app_url=app_url, username=username, password=password)
+        result = report_nonfunctional_button(cfg, "Open Forecast Panel")
+        st.session_state["last_result"] = result
+        st.session_state["selected_report_name"] = result.report_path.name if result.report_path else None
+        st.error("Bug detected: 'Open Forecast Panel' is a non-functional button. Report generated.")
+
+    st.divider()
     question = st.text_area(
         "Question",
         placeholder="How many orders were placed in 2026?\nWith AI: revenue of top 3 clients last year",
@@ -248,6 +260,7 @@ with tab_ask:
             )
         if st.button("Clear result", key="clear_ask"):
             st.session_state["last_result"] = None
+            st.session_state["selected_report_name"] = None
             st.rerun()
     elif res and res.report:
         if res.report.classification.value == "unsupported_auth_flow" or "Invalid credentials" in (
@@ -265,31 +278,46 @@ with tab_ask:
             st.download_button("Download bug report", res.report_path.read_bytes(), file_name=res.report_path.name)
         if st.button("Clear error", key="clear_err"):
             st.session_state["last_result"] = None
+            st.session_state["selected_report_name"] = None
             st.rerun()
 
 with tab_reports:
     st.subheader("Generated reports")
     adir = Path("artifacts")
     reps = sorted(
-        [p for pat in ("bug_report.md", "qa_report.md", "qa_report.json") for p in adir.glob(pat)],
+        [p for pat in ("bug_report*.md", "qa_report.md", "qa_report.json") for p in adir.glob(pat)],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not reps:
         st.info("No automatic bug or QA reports have been generated yet.")
     else:
-        names = [p.name for p in reps]
-        pick = st.selectbox("Report", names, index=0)
-        rp = next(p for p in reps if p.name == pick)
-        st.caption(str(rp))
-        try:
-            text = rp.read_text()
-        except OSError as e:
-            st.error(f"Could not read {rp.name}: {e}")
+        options = {"Choose a report": None}
+        for report_path in reps:
+            stamp = report_path.stat().st_mtime
+            label = f"{report_path.stem} ({__import__('datetime').datetime.fromtimestamp(stamp).strftime('%Y-%m-%d %H:%M:%S')})"
+            options[label] = report_path.name
+
+        labels = list(options.keys())
+        current_name = st.session_state.get("selected_report_name")
+        current_label = next((label for label, name in options.items() if name == current_name), "Choose a report")
+        pick = st.selectbox("Reports", labels, index=labels.index(current_label), key="report_picker")
+        chosen_name = options[pick]
+        st.session_state["selected_report_name"] = chosen_name
+
+        if chosen_name is None:
+            st.caption("Reports are available below. Select one to preview or download it.")
         else:
-            if len(text) > 8_000:
-                st.markdown(text[:8_000])
-                st.caption(f"Truncated: showing 8,000 of {len(text)} chars — download for full report.")
+            rp = next(p for p in reps if p.name == chosen_name)
+            st.caption(str(rp))
+            try:
+                text = rp.read_text()
+            except OSError as e:
+                st.error(f"Could not read {rp.name}: {e}")
             else:
-                st.markdown(text) if rp.suffix == ".md" else st.code(text[:8_000], language="json")
-            st.download_button("Download report", rp.read_bytes(), file_name=rp.name, key=f"dl_{rp.name}")
+                if len(text) > 8_000:
+                    st.markdown(text[:8_000])
+                    st.caption(f"Truncated: showing 8,000 of {len(text)} chars — download for full report.")
+                else:
+                    st.markdown(text) if rp.suffix == ".md" else st.code(text[:8_000], language="json")
+                st.download_button("Download report", rp.read_bytes(), file_name=rp.name, key=f"dl_{rp.name}")

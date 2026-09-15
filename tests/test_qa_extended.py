@@ -6,7 +6,13 @@ from fakes import PageStub, ScriptedEvaluatePage
 
 from sap_agent.context import SessionContext
 from sap_agent.schemas import Config, Severity
-from sap_agent.tools.qa import QaPageReport, _align_severities, _performance_hints, _title_size
+from sap_agent.tools.qa import (
+    QaPageReport,
+    _align_severities,
+    _nonfunctional_buttons,
+    _performance_hints,
+    _title_size,
+)
 
 
 def _ctx() -> SessionContext:
@@ -74,3 +80,52 @@ class TestAlignSeverities:
         report = QaPageReport(route="x")
         _align_severities(report)
         assert report.accessibility_issues == []
+
+
+class TestNonfunctionalButtons:
+    def test_maps_js_findings(self) -> None:
+        page = ScriptedEvaluatePage(
+            results=[
+                [
+                    {
+                        "type": "nonfunctional_button",
+                        "element": "<button>#save Save",
+                        "severity": "medium",
+                        "suggestion": "click produced no visible change",
+                    }
+                ]
+            ]
+        )
+
+        issues = _nonfunctional_buttons(page)
+
+        assert len(issues) == 1
+        assert issues[0].type == "nonfunctional_button"
+        assert issues[0].severity is Severity.MEDIUM
+        assert "no visible" in issues[0].suggestion
+
+    def test_respects_max_issues(self) -> None:
+        page = ScriptedEvaluatePage(
+            results=[
+                [
+                    {
+                        "type": "nonfunctional_button",
+                        "element": f"<button>#b{i}",
+                        "severity": "medium",
+                        "suggestion": "x",
+                    }
+                    for i in range(6)
+                ]
+            ]
+        )
+
+        issues = _nonfunctional_buttons(page, max_issues=3)
+
+        assert len(issues) == 3
+
+    def test_exception_returns_empty(self) -> None:
+        class ErrorPage(PageStub):
+            def evaluate(self, expression, arg=None, **kwargs):
+                raise RuntimeError("no browser")
+
+        assert _nonfunctional_buttons(ErrorPage()) == []

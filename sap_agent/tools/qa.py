@@ -41,6 +41,7 @@ _MEDIUM_TYPES = frozenset(
         "spacing_inconsistency",
         "alignment_issue",
         "interaction_affordance",
+        "nonfunctional_button",
         "page_consistency",
     }
 )
@@ -86,6 +87,84 @@ def _align_severities(report: QaPageReport) -> None:
         issue.severity = classify_issue(issue.type)
 
 
+def _nonfunctional_buttons(page: PageLike, max_issues: int = 10) -> list[UxIssue]:
+    """Detect visible controls that appear clickable but produce no page effect after click."""
+    try:
+        raw = page.evaluate(
+            """() => {
+                const describe = (el) => {
+                    const text = (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 48);
+                    const tag = el.tagName.toLowerCase();
+                    const id = el.id ? '#' + el.id : '';
+                    const cls = typeof el.className === 'string' && el.className
+                        ? '.' + el.className.split(/\\s+/).slice(0, 2).join('.')
+                        : '';
+                    return (text || (`<${tag}${id}${cls}>`)).slice(0, 80);
+                };
+                const visible = (el) => {
+                    const style = getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                    return el.getClientRects().length > 0;
+                };
+                const candidates = Array.from(document.querySelectorAll('button, .sapMBtn, [role="button"]'))
+                    .filter((el) => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true')
+                    .slice(0, 10);
+
+                const findings = [];
+                for (const button of candidates) {
+                    const before = {
+                        url: location.href,
+                        title: document.title,
+                        htmlLength: document.body.innerHTML.length,
+                        dialogs: document.querySelectorAll('.sapMDialog, [role="dialog"]').length,
+                        rows: document.querySelectorAll('tr').length,
+                    };
+
+                    button.click();
+                    await new Promise((resolve) => setTimeout(resolve, 150));
+
+                    const after = {
+                        url: location.href,
+                        title: document.title,
+                        htmlLength: document.body.innerHTML.length,
+                        dialogs: document.querySelectorAll('.sapMDialog, [role="dialog"]').length,
+                        rows: document.querySelectorAll('tr').length,
+                    };
+
+                    const changed = before.url !== after.url || before.title !== after.title
+                        || before.htmlLength !== after.htmlLength
+                        || before.dialogs !== after.dialogs
+                        || before.rows !== after.rows;
+
+                    if (!changed) {
+                        findings.push({
+                            type: 'nonfunctional_button',
+                            element: describe(button),
+                            severity: 'medium',
+                            suggestion: 'click produced no visible state change, route change, or dialog',
+                        });
+                    }
+                }
+                return findings;
+            }""")
+    except (PlaywrightError, RuntimeError, OSError, ValueError, TypeError, AttributeError):
+        return []
+
+    issues: list[UxIssue] = []
+    for entry in raw or []:
+        if len(issues) >= max_issues:
+            break
+        issues.append(
+            UxIssue(
+                type=str(entry.get("type", "nonfunctional_button")),
+                element=str(entry.get("element", "")),
+                severity=Severity(str(entry.get("severity", Severity.MEDIUM.value))),
+                suggestion=str(entry.get("suggestion", "")),
+            )
+        )
+    return issues
+
+
 def _audit_page(page: PageLike, route: str, ctx: SessionContext, _capture: CaptureLike) -> QaPageReport:
     navigate(page, route, ctx.config.app_url, timeout_ms=ctx.config.nav_timeout_ms)
     # Viewport-only screenshots: full-page stitching is 2-4x slower and 5-10x
@@ -93,6 +172,7 @@ def _audit_page(page: PageLike, route: str, ctx: SessionContext, _capture: Captu
     screenshots = [capture_page(page, route, ctx, full_page=False)]
     a11y = audit_accessibility(page)
     ux = critique_ux(page)
+    ux.extend(_nonfunctional_buttons(page))
     hints = _performance_hints(page)
     ctx.record(
         "qa",
