@@ -1,10 +1,14 @@
 .venv/
 __pycache__/
 *.pyc
+.DS_Store
 artifacts/
 .streamlit/secrets.toml
 .env
 .env.*
+.claude/settings.local.json
+.codex/hooks.json
+.impeccable/
 playwright-report/
 test-results/
 sap-agent/tools/pycache/

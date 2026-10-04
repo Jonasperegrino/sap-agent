@@ -22,6 +22,7 @@ uv run python -m sap_agent.cli story   # -> artifacts/story/uc1,uc2,uc3 (pins 20
 
 # Streamlit operator UI
 make ui   # -> http://localhost:8501 (defaults to live app)
+# Optional: restore the hidden Investigate tab with SAP_AGENT_SHOW_INVESTIGATE_TAB=1
 ```
 
 Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secure prompt, never argv.
@@ -50,6 +51,13 @@ make demo    # interactive QA walk with colored terminal output
 ```
 
 Each `make eval` run persists `artifacts/eval_runs/<ts>.json` + `history.md` trend.
+
+## Hackathon polish TODOs
+
+- Capture a genuine Fiori dashboard screenshot with SO-1024 visible and add it as `artifacts/story/uc4/fiori_dashboard.png`.
+- Capture the backend/database evidence view for SO-1024 (source USD amount, FX rate, `non_eu_v2` path, and persisted `amountEur`) as `artifacts/story/uc4/ingestion_record.png`. Keep the view clearly labeled as simulated; no live ingestion service is connected.
+
+Verified locally (2026-10-04): Bug reports regenerates on tab entry, its Markdown download works, and desktop/390px layouts have no horizontal overflow or browser page errors. Until screenshots are added, the tab shows structured evidence panels.
 
 ## Module layout
 

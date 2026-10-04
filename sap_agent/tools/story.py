@@ -1,6 +1,6 @@
 """Story runner (WP7): one cmd regenerates uc1,uc2,uc3 deterministic.
 
-Resets storage, empties artifacts/story/uc1,uc2,uc3, pins date 2026-10-05,
+Resets storage, empties artifacts/story/uc1,uc2,uc3,uc4, pins date 2026-10-05,
 writes answers + screenshots + decision log. Deterministic sans
 timestamps/latencies. Demo mode is rules-only (no JEV/LLM calls).
 # ponytail: static CSS highlight. Programmatic outline if video needs zoom.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import suppress
 from pathlib import Path
 
 STORY_DATE = "2026-10-05"
@@ -80,6 +81,11 @@ CREDIT_CUSTOMERS = [
 
 
 def _write_png(path: Path) -> None:
+    try:
+        if path.exists() and path.stat().st_size > 1024:
+            return  # keep a real capture; stubs never overwrite it
+    except OSError:
+        pass
     path.write_bytes(_PNG)
 
 
@@ -90,9 +96,17 @@ def run_story(base: str | Path = "artifacts/story") -> dict:
     from .reconcile import heads_up, reconcile
 
     root = Path(base)
+    # Preserve real captures across regen (stubs are <1KB, real shots survive).
+    keep: dict[str, bytes] = {}
     if root.exists():
+        for p in root.rglob("*.png"):
+            try:
+                if p.is_file() and p.stat().st_size > 1024:
+                    keep[str(p.relative_to(root))] = p.read_bytes()
+            except OSError:
+                pass
         shutil.rmtree(root)
-    ucs = {u: root / u for u in ("uc1", "uc2", "uc3")}
+    ucs = {u: root / u for u in ("uc1", "uc2", "uc3", "uc4")}
     for d in ucs.values():
         d.mkdir(parents=True, exist_ok=True)
 
@@ -191,8 +205,19 @@ def run_story(base: str | Path = "artifacts/story") -> dict:
     )
     _write_png(ucs["uc3"] / "kpi.png")
 
+    # UC4: reconcile the Fiori-visible value with a simulated backend import check.
+    from .ingestion_demo import analyze_demo_ingestion, report_markdown
+
+    ingestion = analyze_demo_ingestion()
+    log("backend_ingestion", "deterministic-simulation", "currency_normalization_failed", "reported-demo-only")
+    (ucs["uc4"] / "answer.json").write_text(json.dumps(ingestion, indent=2, sort_keys=True))
+    (ucs["uc4"] / "bug_report.md").write_text(report_markdown(ingestion))
+
     # Shared deterministic decision log (no timestamps/latencies) + recorded JEV example
     log("intent", "jev-recorded", "count_where:built=2026", "accepted-example")
     for d in ucs.values():
         (d / "decisions.jsonl").write_text("\n".join(json.dumps(e, sort_keys=True) for e in decisions) + "\n")
+    for rel, data in keep.items():
+        with suppress(OSError):
+            (root / rel).write_bytes(data)
     return {"uc1": c["total"], "uc2": verdict, "uc3": rec["delta"]}

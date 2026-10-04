@@ -1,9 +1,26 @@
 [theme]
-primaryColor = "#00d4ff"
+base = "light"
+primaryColor = "#0a6ed1"
+font = "sans-serif"
+headingFont = "sans-serif"
+codeFont = "monospace"
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+borderColor = "#1e293b"
+showWidgetBorder = true
+
+[theme.dark]
 backgroundColor = "#0a0f1a"
 secondaryBackgroundColor = "#0f172a"
 textColor = "#e2e8f0"
-font = "sans serif"
+borderColor = "#1e293b"
+
+[theme.light]
+primaryColor = "#0a6ed1"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f1f5f9"
+textColor = "#0f172a"
+borderColor = "#e2e8f0"
 
 [server]
 headless = true
