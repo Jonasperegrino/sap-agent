@@ -14,7 +14,11 @@ uv run playwright install chromium   # one-time
 SAP_AGENT_USER=demo SAP_AGENT_PASSWORD=password123 \
   uv run python -m sap_agent.cli login
 # SAP_AGENT_URL defaults to https://jonasperegrino.github.io/sap-fiori/
-# override locally: SAP_AGENT_URL=http://localhost:8080 ...
+# local only: SAP_AGENT_URL=http://localhost:8080 SAP_AGENT_USER=demo SAP_AGENT_PASSWORD=password123 \
+  uv run python -m sap_agent.cli login
+
+# Deterministic video slice (no browser, no network, rules-only):
+uv run python -m sap_agent.cli story   # -> artifacts/story/uc1,uc2,uc3 (pins 2026-10-05)
 
 # Streamlit operator UI
 make ui   # -> http://localhost:8501 (defaults to live app)
@@ -33,6 +37,7 @@ Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secur
 | `report` | on login failure: draft classified bug report |
 | `qa [--format json|markdown]` | full audit walk: screenshots, a11y, UX, perf hints per route |
 | `agent` | planner-mode loop: picks next action (login→audit…) until every route is audited |
+| `story` | regenerate deterministic uc1/uc2/uc3 artifacts (rules-only, video slice) |
 
 ## Evaluation & quality gates
 

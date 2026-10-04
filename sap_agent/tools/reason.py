@@ -77,24 +77,34 @@ def parse_question_with_llm(
     config=None,
     ctx=None,
 ) -> IntentConfig:
-    """Rule first, LLM fallback (openai-compatible via SAP_AGENT_LLM_API_KEY).
+    """Rule first, LLM/JEV fallback (SAP_AGENT_LLM_API_KEY / SAP_AGENT_JEV_API_KEY).
 
-    Keeps deterministic core — LLM only fires when rule returns UNSUPPORTED or
+    Keeps deterministic core — remote only fires when rule returns UNSUPPORTED or
     empty, and result is validated into IntentConfig. No key ever enters trace.
+    Chain: rule -> LLM (slot filling) -> JEV (cheap classification only,
+    value stays None so answer.py asks a guided follow-up).
     """
     base = parse_question(question)
     if base.intent != QuestionIntent.UNSUPPORTED:
         return base
-    if config is None or not getattr(config, "has_llm", lambda: False)():
-        return base
-    try:
-        from .llm import call_llm_for_intent
+    if config is not None and getattr(config, "has_llm", lambda: False)():
+        try:
+            from .llm import call_llm_for_intent
 
-        llm_cfg = call_llm_for_intent(question, config, ctx)
-        if llm_cfg is not None and llm_cfg.intent != QuestionIntent.UNSUPPORTED:
-            return llm_cfg
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as exc:
-        logger.debug("llm fallback skipped: %s", exc)
+            llm_cfg = call_llm_for_intent(question, config, ctx)
+            if llm_cfg is not None and llm_cfg.intent != QuestionIntent.UNSUPPORTED:
+                return llm_cfg
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as exc:
+            logger.debug("llm fallback skipped: %s", exc)
+    if config is not None and getattr(config, "has_jev", lambda: False)():
+        try:
+            from .jev import call_jev_for_intent
+
+            jev_cfg = call_jev_for_intent(question, config, ctx)
+            if jev_cfg is not None and jev_cfg.intent != QuestionIntent.UNSUPPORTED:
+                return jev_cfg
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as exc:
+            logger.debug("jev fallback skipped: %s", exc)
     return base
 
 

@@ -23,7 +23,7 @@ from playwright.sync_api import Error as PlaywrightError
 from ..schemas import AnsweredQuestion, AnswerEvidence, IntentConfig, QuestionIntent
 from ..ui5.bridge import current_route
 from .answer_aggregate import _aggregate_top
-from .answer_core import _freeze, _infer_auto_route, _matches, _snapshot, _wait_for_table_rows, fetch_json_body
+from .answer_core import _freeze, _matches, _snapshot, _wait_for_table_rows, fetch_json_body
 from .answer_lookup import _lookup_customer, _lookup_product
 from .nav import navigate
 from .reason import parse_question, parse_question_with_llm
@@ -55,6 +55,20 @@ def evaluate_question(
     table; defaults to the current page — backward compatible.
     `capture` optional NetworkCapture for precise numeric aggregation (prefers JSON amountEur).
     """
+    from .jev import check_guardrail
+
+    verdict = check_guardrail(question, getattr(ctx, "config", None), ctx)
+    if verdict == "block":
+        return _freeze(
+            AnsweredQuestion(
+                question=question,
+                intent=QuestionIntent.UNSUPPORTED,
+                unsupported=True,
+                message="blocked by guardrail: possible injection or unsafe request",
+                follow_up="please rephrase as a read-only question about the app data",
+            ),
+            ctx,
+        )
     if intent is None:
         # LLM slot: rule first, LLM fallback if configured
         try:
@@ -105,7 +119,9 @@ def evaluate_question(
         navigate(page, route, app_url)
         ctx.record("nav", f"navigate.{route}", outcome="landed", url=page.url)
     elif route is None:
-        auto = _infer_auto_route(intent)
+        from .jev import resolve_auto_route
+
+        auto = resolve_auto_route(question, intent, getattr(ctx, "config", None), ctx)
         if auto is not None and current_route(page) != "#/" + auto:
             try:
                 navigate(page, auto, app_url)

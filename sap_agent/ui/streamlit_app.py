@@ -62,9 +62,8 @@ def _chromium_ready() -> bool:
     the browser is available.
     """
     import pathlib as _pl2
-    import threading
 
-    from sap_agent.browser import try_install_chromium
+    from sap_agent.browser import ensure_chromium_install_started
 
     bases = [
         _pl2.Path.home() / ".cache" / "ms-playwright",
@@ -74,22 +73,11 @@ def _chromium_ready() -> bool:
     if any(_b.exists() and any(_b.glob("chromium*")) for _b in bases):
         return True
 
-    # Start installer in background once to avoid blocking the Streamlit thread.
-    if not getattr(_chromium_ready, "_installer_started", False):
-
-        def _install():
-            try:
-                try_install_chromium()
-            except Exception:
-                # Installer failures are non-fatal for the UI; errors are logged
-                # by the installer or its caller.
-                return
-
-        t = threading.Thread(target=_install, daemon=True)
-        t.start()
-        from typing import cast
-
-        cast("Any", _chromium_ready)._installer_started = True
+    # Start installer in background once per server process to avoid
+    # blocking the Streamlit thread. Guard lives in sap_agent.browser
+    # (imported module persists across reruns; this file is re-executed
+    # via runpy on every run so local state would reset).
+    ensure_chromium_install_started()
 
     return False
 
@@ -197,7 +185,7 @@ with st.sidebar:
     else:
         st.caption("Deterministic mode — aggregate queries may be unsupported")
 
-tab_ask, tab_reports = st.tabs(["Ask", "Reports"])
+tab_ask, tab_story, tab_reports = st.tabs(["Ask", "Story", "Reports"])
 
 with tab_ask:
     question = st.text_area(
@@ -277,17 +265,26 @@ with tab_ask:
         elif a.not_found:
             st.info(a.message or "No matching rows found.")
         else:
-            # nice rendering for customer lookup
+            # nice rendering for entity lookups (customer vs product shapes)
             if a.intent.value == "lookup" and isinstance(a.answer, list) and a.answer:
                 rec = a.answer[0]
-                st.success(
-                    f"Contact for {rec.get('customer', '')}: "
-                    f"**{rec.get('contact', '')}** — {rec.get('contactTitle', '')}"
-                )
-                c1, c2 = st.columns(2)
-                c1.markdown(f"**Email:** {rec.get('email', '')}")
-                c2.markdown(f"**Phone:** {rec.get('phone', '')}")
-                st.caption(f"{rec.get('city', '')}, {rec.get('country', '')} · {rec.get('industry', '')}")
+                if isinstance(rec, dict) and "customer" in rec:
+                    st.success(
+                        f"Contact for {rec.get('customer', '')}: "
+                        f"**{rec.get('contact', '')}** — {rec.get('contactTitle', '')}"
+                    )
+                    c1, c2 = st.columns(2)
+                    c1.markdown(f"**Email:** {rec.get('email', '')}")
+                    c2.markdown(f"**Phone:** {rec.get('phone', '')}")
+                    st.caption(f"{rec.get('city', '')}, {rec.get('country', '')} · {rec.get('industry', '')}")
+                elif isinstance(rec, dict) and "name" in rec:
+                    parts = [
+                        f"{k}: {rec.get(k, '')}" for k in ("price", "stock", "category", "unit") if rec.get(k, "") != ""
+                    ]
+                    st.success(f"{rec.get('name', '')}" + (f" — {' · '.join(parts)}" if parts else ""))
+                    st.json(rec)
+                else:
+                    st.success(f"Answer: {a.answer}")
             else:
                 st.success(f"Answer: {a.answer}")
             if _llm_used:
@@ -329,6 +326,53 @@ with tab_ask:
         if st.button("Clear error", key="clear_err"):
             st.session_state["last_result"] = None
             st.rerun()
+
+with tab_story:
+    st.markdown(
+        "<style>.story-big{font-size:1.4rem;font-weight:700}.story-kpi{font-size:2rem;font-weight:800}"
+        ".kpi-hl{background:#fef08a;color:#111;padding:0 .3em;border-radius:.2em}</style>",
+        unsafe_allow_html=True,
+    )
+    import json as _sjson
+
+    sroot = Path("artifacts/story")
+    for uc, title in (
+        ("uc1", "UC1 — Credit exposure"),
+        ("uc2", "UC2 — Release sweep"),
+        ("uc3", "UC3 — The number that doesn't add up"),
+    ):
+        st.markdown(f'<div class="story-big">{title}</div>', unsafe_allow_html=True)
+        aj = sroot / uc / "answer.json"
+        if not aj.exists():
+            st.info(f"No artifacts for {uc} yet — run: fiori-agent story")
+            continue
+        data = _sjson.loads(aj.read_text())
+        if uc == "uc1":
+            st.markdown(
+                f'<div class="story-kpi">Total €{data["total"]:,.2f} · '
+                f"Sept 2026 revenue €{data['sept_2026_revenue']:,.2f}</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(f"{data['open_definition']} · checksum {data['checksum']}")
+        elif uc == "uc2":
+            st.markdown(f'<div class="story-kpi">Verdict: {data["verdict"]}</div>', unsafe_allow_html=True)
+            st.caption(f"Classification: `{data['classification']}`")
+        else:
+            st.markdown(
+                f'<div class="story-kpi">KPI <span class="kpi-hl">€{data["kpi"]:,.2f}</span> '
+                f"· revenue €{data['revenue']:,.2f} · delta €{data['delta']:,.2f}</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(data.get("heads_up", ""))
+        for img in sorted((sroot / uc).glob("*.png")):
+            st.image(str(img), caption=img.name)
+        with st.expander("Evidence and decision log"):
+            st.json({k: v for k, v in data.items() if k != "breakdown"})
+            if "breakdown" in data:
+                st.json(data["breakdown"])
+            dl = sroot / uc / "decisions.jsonl"
+            if dl.exists():
+                st.code(dl.read_text(), language="json")
 
 with tab_reports:
     st.subheader("Generated reports")

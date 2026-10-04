@@ -49,10 +49,17 @@ class AgentMemory:
         self.history_dir = history_dir
         self.history_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_history(self) -> list[QaReport]:
-        """Stored reports, oldest first; unreadable files are skipped."""
+    def load_history(self, *, limit: int | None = None) -> list[QaReport]:
+        """Stored reports, oldest first; unreadable files are skipped.
+
+        `limit` caps parsing to the newest N files so long histories cannot
+        stall every run (perf) — callers needing only the latest pass limit=1.
+        """
+        paths = sorted(self.history_dir.glob("qa_report_*.json"))
+        if limit is not None:
+            paths = paths[-limit:]
         reports: list[QaReport] = []
-        for path in sorted(self.history_dir.glob("qa_report_*.json")):
+        for path in paths:
             try:
                 reports.append(QaReport.model_validate_json(path.read_text()))
             except (ValueError, OSError):
@@ -60,8 +67,12 @@ class AgentMemory:
         return reports
 
     def save_report(self, report: QaReport) -> Path:
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
         path = self.history_dir / f"qa_report_{stamp}.json"
+        counter = 0
+        while path.exists():
+            counter += 1
+            path = self.history_dir / f"qa_report_{stamp}_{counter}.json"
         path.write_text(report.model_dump_json(indent=2))
         return path
 

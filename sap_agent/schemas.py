@@ -274,6 +274,7 @@ class AgentResult(BaseModel):
 class Severity(StrEnum):
     """Issue severity for QA reports (issue #698 rules)."""
 
+    BLOCKER = "blocker"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -411,6 +412,16 @@ class Config(BaseModel):
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-5"
     llm_base_url: str = "https://api.openai.com/v1"
+    #: JEV slot: System One typed decisions for intent classification.
+    #: Full endpoint URL (providers differ), e.g. .../learn/alpha/decisions.
+    jev_api_key: SecretStr | None = None
+    jev_api_url: str = "https://algoholic.io/api/v1/learn/alpha/decisions"
+    jev_model: str = "system-one-models"
+    jev_timeout_s: float = 10.0
+    jev_confidence_threshold: float = 0.8
+    #: Reference date for relative periods (WP1). Env SAP_AGENT_REFERENCE_DATE
+    #: (YYYY-MM-DD); story pins 2026-10-05. Defaults to system date.
+    reference_date: str = ""
 
     @classmethod
     def from_env(cls, **overrides: Any) -> Config:
@@ -453,6 +464,31 @@ class Config(BaseModel):
         raw_llm_base = os.environ.get("SAP_AGENT_LLM_BASE_URL")
         if raw_llm_base:
             env["llm_base_url"] = raw_llm_base.rstrip("/")
+        # JEV env (optional, no hard dependency)
+        raw_jev_key = os.environ.get("SAP_AGENT_JEV_API_KEY")
+        if raw_jev_key:
+            env["jev_api_key"] = SecretStr(raw_jev_key)
+        raw_jev_url = os.environ.get("SAP_AGENT_JEV_API_URL")
+        if raw_jev_url:
+            env["jev_api_url"] = raw_jev_url.rstrip("/")
+        raw_jev_model = os.environ.get("SAP_AGENT_JEV_MODEL")
+        if raw_jev_model:
+            env["jev_model"] = raw_jev_model
+        raw_jev_timeout = os.environ.get("SAP_AGENT_JEV_TIMEOUT_S")
+        if raw_jev_timeout:
+            try:
+                env["jev_timeout_s"] = float(raw_jev_timeout)
+            except ValueError as exc:
+                raise ValueError(f"SAP_AGENT_JEV_TIMEOUT_S must be a number, got {raw_jev_timeout!r}") from exc
+        raw_jev_conf = os.environ.get("SAP_AGENT_JEV_CONFIDENCE_THRESHOLD")
+        if raw_jev_conf:
+            try:
+                env["jev_confidence_threshold"] = float(raw_jev_conf)
+            except ValueError as exc:
+                raise ValueError(f"SAP_AGENT_JEV_CONFIDENCE_THRESHOLD must be a number, got {raw_jev_conf!r}") from exc
+        raw_ref = os.environ.get("SAP_AGENT_REFERENCE_DATE", "")
+        if raw_ref:
+            env["reference_date"] = raw_ref.strip()
         env.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**env)
 
@@ -461,3 +497,32 @@ class Config(BaseModel):
 
     def has_llm(self) -> bool:
         return bool(self.llm_api_key and self.llm_api_key.get_secret_value())
+
+    def has_jev(self) -> bool:
+        if self.jev_api_key and self.jev_api_key.get_secret_value():
+            return True
+        # local endpoints (Ollama) need no key
+        return "localhost" in self.jev_api_url or "127.0.0.1" in self.jev_api_url
+
+    def effective_reference_date(self) -> str:
+        """WP1: SAP_AGENT_REFERENCE_DATE or system date (YYYY-MM-DD)."""
+        if self.reference_date:
+            return self.reference_date
+        from datetime import date as _date
+
+        return _date.today().isoformat()
+
+    def resolve_last_month(self) -> tuple[str, str]:
+        """WP1: last-month range vs reference date. Returns (first, last) YYYY-MM-DD."""
+        from calendar import monthrange
+        from datetime import date as _date
+
+        ref = self.effective_reference_date()
+        try:
+            y, m, _d = (int(p) for p in ref.split("-"))
+            cur = _date(y, m, 1)
+        except (ValueError, TypeError):
+            cur = _date.today()
+        pm_y, pm_m = (cur.year, cur.month - 1) if cur.month > 1 else (cur.year - 1, 12)
+        last = monthrange(pm_y, pm_m)[1]
+        return (f"{pm_y:04d}-{pm_m:02d}-01", f"{pm_y:04d}-{pm_m:02d}-{last:02d}")

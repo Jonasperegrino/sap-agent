@@ -11,6 +11,36 @@ a host that set none of the vars silently launched with bare `headless=`.
 
 from __future__ import annotations
 
+import threading
+
+_installer_lock = threading.Lock()
+_installer_started = False
+
+
+def ensure_chromium_install_started() -> bool:
+    """Start the background Chromium installer at most once per process.
+
+    Lives here (not in the Streamlit script) because the root shim
+    re-executes the UI file on every rerun via runpy — function attributes
+    and module globals there reset, while this imported module persists in
+    sys.modules across reruns.
+    Returns True when this call started the installer.
+    """
+    global _installer_started
+    with _installer_lock:
+        if _installer_started:
+            return False
+        _installer_started = True
+
+    def _install() -> None:
+        try:
+            try_install_chromium()
+        except Exception:
+            return
+
+    threading.Thread(target=_install, daemon=True).start()
+    return True
+
 
 def launch_args(*, low_memory_fallback: bool = False) -> dict:
     """Chromium args safe for sandboxed / low-shm envs and local dev.

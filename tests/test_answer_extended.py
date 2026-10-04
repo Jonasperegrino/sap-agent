@@ -427,14 +427,15 @@ class TestInferAutoRoute:
         )
         assert _infer_auto_route(intent) is None
 
-    def test_aggregate_avg_returns_none(self) -> None:
+    def test_aggregate_avg_price_routes_catalog(self) -> None:
+        # product-column aggregates belong to the catalog table (products.json)
         intent = IntentConfig(
             intent=QuestionIntent.AGGREGATE,
             aggregation="avg",
             aggregation_column="price",
             group_by="category",
         )
-        assert _infer_auto_route(intent) is None
+        assert _infer_auto_route(intent) == "catalog"
 
     def test_count_where_still_routes_customers(self) -> None:
         intent = IntentConfig(

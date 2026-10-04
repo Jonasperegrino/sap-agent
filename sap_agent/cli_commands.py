@@ -180,7 +180,7 @@ def _persist_and_emit_qa(report: QaReport, ctx: SessionContext, *, fmt: str | No
     md_path.write_text(report.to_markdown())
 
     memory = AgentMemory(ctx.artifact_path("history"))
-    previous = memory.load_history()
+    previous = memory.load_history(limit=1)
     if previous:
         diff = memory.diff_reports(previous[-1], report)
         status_counts = diff.counts_by_status()
@@ -219,6 +219,18 @@ def _persist_and_emit_qa(report: QaReport, ctx: SessionContext, *, fmt: str | No
     return path
 
 
+def cmd_story() -> int:
+    """WP7: one cmd regenerates artifacts/story/uc1,uc2,uc3 deterministic (rules-only)."""
+    import os
+
+    os.environ["SAP_AGENT_REFERENCE_DATE"] = "2026-10-05"
+    from .tools.story import run_story
+
+    summary = run_story()
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def _succeeded(history: list[StepResult], tool: str, action: str) -> bool:
     """True when `tool.action` already succeeded in the planner history."""
     return any(r.tool == tool and r.action == action and r.status == StepStatus.SUCCESS for r in history)
@@ -230,7 +242,11 @@ def cmd_agent(config: Config, no_color: bool = False) -> int:  # pragma: no cove
     login first, then audit whichever top-level route is still unvisited —
     until every route is audited or the loop aborts (budget / stuck /
     non-retryable failure). Every decision is traced (`plan.decide.*`)."""
+    from .tools.accessibility import audit_accessibility
+    from .tools.nav import go_back, open_first_row
     from .tools.qa import _align_severities, _audit_page
+    from .tools.screenshot import capture_page
+    from .tools.ux_critique import critique_ux
 
     set_color_enabled(not no_color)
     terminal.print_header("SAP Fiori QA Agent — planner mode")
@@ -308,6 +324,22 @@ def cmd_agent(config: Config, no_color: bool = False) -> int:  # pragma: no cove
                     kind,
                 )
                 return 1
+            # Customer drill-down mirrors run_qa coverage: without it the
+            # history diff would mark customer-page issues "resolved"
+            # simply because this path never audited them.
+            try:
+                open_first_row(page, timeout_ms=config.nav_timeout_ms)
+                collected.append(
+                    QaPageReport(
+                        route="customer",
+                        screenshots=[capture_page(page, "customer", ctx, full_page=False)],
+                        accessibility_issues=audit_accessibility(page),
+                        ux_issues=critique_ux(page),
+                    )
+                )
+                go_back(page, timeout_ms=config.nav_timeout_ms)
+            except Exception as exc:  # best-effort: routes already collected stand
+                logger.debug("customer drill-down skipped: %s", exc)
             for page_report in collected:
                 _align_severities(page_report)
             report = QaReport(

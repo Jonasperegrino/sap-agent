@@ -1,5 +1,0 @@
-artifacts
-docs
-sap_agent
-scripts
-tests

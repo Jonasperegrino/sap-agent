@@ -1,2 +1,0 @@
-[console_scripts]
-fiori-agent = sap_agent.cli:main

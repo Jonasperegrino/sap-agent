@@ -31,9 +31,6 @@ class TableData:
     rows: list[list[str]] = field(default_factory=list)
     row_count: int = 0
 
-    def to_dict(self) -> dict[str, object]:
-        return {"columns": self.columns, "rows": self.rows, "row_count": self.row_count}
-
 
 #: cap rows per table so huge tables cannot stall QA via N+1 roundtrips (perf)
 DEFAULT_MAX_ROWS = 500

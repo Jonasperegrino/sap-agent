@@ -60,4 +60,4 @@ def test_aligned_report_aggregation() -> None:
     )
     for page in report.pages:
         _align_severities(page)
-    assert report.counts_by_severity() == {"high": 1, "medium": 1, "low": 0}
+    assert report.counts_by_severity() == {"blocker": 0, "high": 1, "medium": 1, "low": 0}

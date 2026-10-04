@@ -260,6 +260,16 @@ class AgentLoop:
 
             repeats = repeats + 1 if candidate.name == last_name else 1
             last_name = candidate.name
+            history.append(result)
+
+            if evaluate_step_result(result):
+                if result.payload is not None:
+                    outcome = result.payload
+                if goal_met(history):
+                    consecutive_failures = 0
+                    continue
+            elif goal_met(history):
+                continue
             if repeats >= self.stuck_threshold:
                 return self._finish(
                     goal,
@@ -270,7 +280,6 @@ class AgentLoop:
                     failure_kind=FailureKind.NAV_LOOP,
                     reasoning=list(chain),
                 )
-            history.append(result)
 
             if evaluate_step_result(result):
                 consecutive_failures = 0

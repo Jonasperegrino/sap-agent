@@ -32,6 +32,28 @@ QA_ROUTES: tuple[str, ...] = ("dashboard", "customers", "catalog", "orders", "se
 
 _HIGH_TYPES = frozenset({"missing_alt", "missing_label"})
 
+MONEY_ROUTES = frozenset({"dashboard", "orders", "customer"})
+
+
+def verdict_no_go(report) -> bool:
+    """No-go if any blocker, or any high on a money-path route."""
+    from ..schemas import Severity
+
+    for page in report.pages:
+        money = page.route in MONEY_ROUTES
+        for issue in [*page.accessibility_issues, *page.ux_issues]:
+            if issue.severity == Severity.BLOCKER:
+                return True
+            if money and issue.severity == Severity.HIGH:
+                return True
+    return False
+
+
+def detect_blocker(*, toast_visible: bool, row_count: int) -> bool:
+    """Toast OR zero-rows = one blocker issue (WP4)."""
+    return bool(toast_visible) or row_count == 0
+
+
 _MEDIUM_TYPES = frozenset(
     {
         "heading_order",
@@ -48,6 +70,8 @@ _MEDIUM_TYPES = frozenset(
 
 def classify_issue(issue_type: str) -> Severity:
     """Map an issue type to its severity (unknown types default to LOW)."""
+    if issue_type in ("toast_or_empty",):
+        return Severity.BLOCKER
     if issue_type in _HIGH_TYPES:
         return Severity.HIGH
     if issue_type in _MEDIUM_TYPES:
@@ -199,6 +223,12 @@ def run_qa(
     for report in pages:
         report.ux_issues.extend(consistency.get(report.route, []))
         _align_severities(report)
+        if ctx.config.has_jev():
+            from .jev import apply_jev_severities
+
+            overridden = apply_jev_severities(report, ctx.config, ctx)
+            if overridden:
+                ctx.record("qa", "jev.severity.summary", outcome=f"overridden={overridden}")
 
     qa_report = QaReport(
         app_url=app_url or ctx.config.app_url,

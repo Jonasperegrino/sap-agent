@@ -20,6 +20,7 @@ from .cli_commands import (
     cmd_login,
     cmd_qa,
     cmd_report,
+    cmd_story,
 )
 from .schemas import Config
 from .tools.auth import validate_app_url
@@ -64,6 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "agent",
         help="planner-mode agent loop: pick login/audit actions until every route is audited (#693)",
     )
+    sub.add_parser("story", help="regenerate deterministic uc1/uc2/uc3 artifacts (rules-only, no network)")
     return parser
 
 
@@ -87,6 +89,8 @@ def _resolve_config(args: argparse.Namespace) -> Config:
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     args = _build_parser().parse_args(argv)
+    if args.command == "story":  # deterministic, browser-free, needs no credentials
+        return cmd_story()
     try:
         config = _resolve_config(args)
     except (ValueError, EOFError, KeyboardInterrupt) as exc:

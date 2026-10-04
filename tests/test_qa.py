@@ -30,7 +30,7 @@ def test_total_issues_counts_all_pages() -> None:
 
 def test_counts_by_severity() -> None:
     report = _report(Severity.HIGH, Severity.LOW)
-    assert report.counts_by_severity() == {"high": 1, "medium": 0, "low": 1}
+    assert report.counts_by_severity() == {"blocker": 0, "high": 1, "medium": 0, "low": 1}
 
 
 def test_counts_include_ux_issues() -> None:

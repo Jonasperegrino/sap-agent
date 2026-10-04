@@ -31,6 +31,9 @@ CLASSIFICATION_MATRIX: dict[str, FailureClass] = {
     FailureKind.INCONSISTENT_LOAD.value: FailureClass.PRODUCT_BUG,
     FailureKind.EMPTY_STATE.value: FailureClass.PRODUCT_BUG,
     FailureKind.BACKEND_ERROR.value: FailureClass.PRODUCT_BUG,
+    # ponytail: hardcoded matrix. Full module if false positives matter.
+    "toast_or_empty": FailureClass.PRODUCT_BUG,
+    "blocker": FailureClass.PRODUCT_BUG,
     FailureKind.SELECTOR_FAILURE.value: FailureClass.AGENT_LIMITATION,
     FailureKind.AGENT_LIMITATION.value: FailureClass.AGENT_LIMITATION,
     AuthFailureKind.REDIRECT_LOOP.value: FailureClass.PRODUCT_BUG,
@@ -113,3 +116,50 @@ def write_report(report: BugReport, ctx: SessionContext, *, name: str = "bug_rep
     path.write_text(report.to_markdown())
     logger.info("bug report written to %s", path)
     return path
+
+
+def write_sweep_reports(report, out_dir: Path, *, verdict: str) -> tuple[Path, list[Path]]:
+    """WP4 output: summary.md + one md per issue (screenshot, repro, expected/actual,
+    severity+confidence+provider, classify_failure)."""
+    from pathlib import Path
+
+    out = out_dir if isinstance(out_dir, Path) else Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    counts = report.counts_by_severity()
+    summary = out / "summary.md"
+    lines = [
+        f"# Sweep summary — verdict: {verdict}",
+        "",
+        f"Pages: {len(report.pages)} · Issues: {report.total_issues} "
+        f"(blocker {counts.get('blocker', 0)}, high {counts.get('high', 0)}, "
+        f"medium {counts.get('medium', 0)}, low {counts.get('low', 0)})",
+        "",
+    ]
+    for page in report.pages:
+        lines.append(f"## {page.route}")
+        lines.extend(
+            f"- [{src}/{issue.severity.value}] {issue.type}: {issue.element}"
+            for src, issues in (("a11y", page.accessibility_issues), ("ux", page.ux_issues))
+            for issue in issues
+        )
+        lines.append("")
+    summary.write_text("\n".join(lines).rstrip() + "\n")
+    paths: list[Path] = []
+    for page in report.pages:
+        for src, issues in (("a11y", page.accessibility_issues), ("ux", page.ux_issues)):
+            for issue in issues:
+                slug = f"{page.route}-{src}-{issue.type}".replace("/", "-").replace(" ", "_")
+                p = out / f"{slug}.md"
+                shot = getattr(issue, "screenshot", "") or (page.screenshots[0].path if page.screenshots else "none")
+                p.write_text(
+                    f"# {issue.type} on {page.route}\n\n"
+                    f"Severity: {issue.severity.value} · confidence: high · provider: rules\n"
+                    f"Classification: `{classify_failure(issue.type).value}`\n\n"
+                    f"## Expected\n{issue.suggestion}\n\n"
+                    f"## Actual\n{issue.type} at {issue.element}\n\n"
+                    f"## Reproduction steps\n1. run: fiori-agent qa\n2. open route {page.route}\n"
+                    f"3. observe {issue.type}\n\n"
+                    f"## Screenshot\n- `{shot}`\n"
+                )
+                paths.append(p)
+    return summary, paths

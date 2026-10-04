@@ -47,7 +47,7 @@ def test_print_summary_renders_counts_and_boxes(capsys) -> None:
     terminal.set_color_enabled(False)
     terminal.print_summary(_report())
     out = capsys.readouterr().out
-    assert "Found 2 issues: 1 high, 0 medium, 1 low" in out
+    assert "Found 2 issues: 0 blocker, 1 high, 0 medium, 1 low" in out
     assert "┌" in out and "└" in out
     assert "accessibility" in out
     assert "UX" in out

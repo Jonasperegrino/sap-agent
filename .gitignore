@@ -8,3 +8,7 @@ artifacts/
 playwright-report/
 test-results/
 sap-agent/tools/pycache/
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/

@@ -50,10 +50,14 @@ def _wait_for_table_rows(page: PageLike, timeout_ms: int = 2_000) -> None:
 
 
 def _infer_auto_route(intent: IntentConfig) -> str | None:
-    if intent.intent == QuestionIntent.AGGREGATE:
-        return None
     col = (intent.column or "").lower()
     grp = (intent.group_by or "").lower()
+    if intent.intent == QuestionIntent.AGGREGATE:
+        # aggregates read sales.json (dashboard, page-independent) except
+        # product-column aggregates, which belong to the catalog table
+        if col in _CATALOG_COLS or grp in _CATALOG_COLS:
+            return "catalog"
+        return None
     if col in _CUSTOMERS_COLS or grp in _CUSTOMERS_COLS:
         return "customers"
     if col in _CATALOG_COLS or grp in _CATALOG_COLS:
