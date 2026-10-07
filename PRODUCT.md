@@ -20,7 +20,7 @@ Open decision: user requested rewrite of deterministic-evidence positioning, no 
 
 ## Operating Context
 
-CLI workflows (`login`, `inspect`, `discover`, `ask`, `report`, `qa`, `agent`, `story`) plus Streamlit operator UI (`Ask` / `Story` / `Reports` tabs). Target: live demo `https://jonasperegrino.github.io/sap-fiori/` (repo `../sap-fiori`, GitHub Pages); local fallback via `FIORI_APP_DIR` / `SAP_AGENT_URL=http://localhost:8080`. Config via `SAP_AGENT_*` env (URL, USER, PASSWORD, LLM_* timeouts); Streamlit Cloud secrets mirror env. Quality gates: `make test` (pytest + 80% coverage), `make lint` (ruff), `make eval` (19 deterministic scenarios → `artifacts/eval_runs/`).
+CLI workflows (`login`, `inspect`, `discover`, `ask`, `report`, `qa`, `agent`, `story`) plus Streamlit operator UI (`Ask Atlas` / `Bug reports` tabs; `Investigate` behind `SAP_AGENT_SHOW_INVESTIGATE_TAB`). Target: live demo `https://jonasperegrino.github.io/sap-fiori/` (repo `../sap-fiori`, GitHub Pages); local fallback via `FIORI_APP_DIR` / `SAP_AGENT_URL=http://localhost:8080`. Config via `SAP_AGENT_*` env (URL, USER, PASSWORD, LLM_* timeouts); Streamlit Cloud secrets mirror env. Quality gates: `make test` (pytest + 80% coverage), `make lint` (ruff), `make eval` (19 deterministic scenarios → `artifacts/eval_runs/`).
 
 ## Capabilities and Constraints
 

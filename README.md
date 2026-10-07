@@ -43,21 +43,21 @@ Env is prefix `SAP_AGENT_*` — see `.env.example`. Credentials via env or secur
 ## Evaluation & quality gates
 
 ```sh
-make test    # pytest + 80% coverage gate (390 tests)
+make test    # pytest + 80% coverage gate (450 tests)
 make lint    # ruff
 make check   # lint + test
-make eval    # 19 deterministic scenarios (defaults to live app; SAP_AGENT_URL=http://localhost:8080 for local)
+make eval    # 25 deterministic scenarios (defaults to live app; SAP_AGENT_URL=http://localhost:8080 for local)
 make demo    # interactive QA walk with colored terminal output
 ```
 
 Each `make eval` run persists `artifacts/eval_runs/<ts>.json` + `history.md` trend.
 
-## Hackathon polish TODOs
+## Demo scenario (SO-1024)
 
-- Capture a genuine Fiori dashboard screenshot with SO-1024 visible and add it as `artifacts/story/uc4/fiori_dashboard.png`.
-- Capture the backend/database evidence view for SO-1024 (source BRL amount, FX rate, `non_eu_v2` path, and persisted `amountEur`) as `artifacts/story/uc4/ingestion_record.png`. Keep the view clearly labeled as simulated; no live ingestion service is connected.
-
-Verified locally (2026-10-04): Bug reports regenerates on tab entry, its Markdown download works, and desktop/390px layouts have no horizontal overflow or browser page errors. Until screenshots are added, the tab shows structured evidence panels.
+Asking why the dashboard Total Value differs from the order amounts runs a scripted investigation
+(`sap_agent/demo_case.py`). Its Fiori figures are a seeded snapshot of the demo app and match the deployed
+`sap-fiori` data; the ingestion log is simulated and labeled as such in the UI and the report. The dashboard
+screenshot on the Bug reports tab is `sap_agent/ui/assets/so-1024-dashboard.png`.
 
 ## Module layout
 

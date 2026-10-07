@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sap_agent.tools.ingestion_demo import (
+import pytest
+
+from sap_agent.demo_case import (
     CASE,
     QUESTION,
     analyze_demo_ingestion,
@@ -38,3 +40,32 @@ def test_scripted_question_matches_with_quotes_and_punctuation() -> None:
     assert matches_demo_question(QUESTION)
     assert matches_demo_question(f"> “{QUESTION.rstrip('?')}”")
     assert not matches_demo_question("How many orders are pending?")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "why does the dashboard total value differ from the order amounts",
+        "Why doesn't Total Value match the orders?",
+        "The dashboard total is wrong, why?",
+        "Why is Total Value higher than the order rows",
+        "numbers don’t match — total value vs orders",
+    ],
+)
+def test_paraphrases_of_the_question_match(question: str) -> None:
+    assert matches_demo_question(question)
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["", "what is the total value", "revenue by status", "average order value", "how many orders are Approved"],
+)
+def test_other_questions_go_to_the_live_agent(question: str) -> None:
+    assert not matches_demo_question(question)
+
+
+def test_old_import_path_still_works() -> None:
+    from sap_agent.tools import ingestion_demo
+
+    assert ingestion_demo.CASE is CASE
+    assert ingestion_demo.analyze_demo_ingestion is analyze_demo_ingestion

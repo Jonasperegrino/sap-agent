@@ -1,26 +1,21 @@
+# One light theme. No [theme.dark] section on purpose: with both variants defined
+# Streamlit follows the visitor's OS, and the product is designed for a light page.
 [theme]
 base = "light"
-primaryColor = "#0a6ed1"
+primaryColor = "#0b66c3"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f1f5f9"
+textColor = "#31333f"
+borderColor = "#e3e7ee"
 font = "sans-serif"
 headingFont = "sans-serif"
 codeFont = "monospace"
 baseRadius = "0.5rem"
 buttonRadius = "0.5rem"
-borderColor = "#1e293b"
-showWidgetBorder = true
+showWidgetBorder = false
 
-[theme.dark]
-backgroundColor = "#0a0f1a"
-secondaryBackgroundColor = "#0f172a"
-textColor = "#e2e8f0"
-borderColor = "#1e293b"
-
-[theme.light]
-primaryColor = "#0a6ed1"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f1f5f9"
-textColor = "#0f172a"
-borderColor = "#e2e8f0"
+[client]
+toolbarMode = "minimal"
 
 [server]
 headless = true

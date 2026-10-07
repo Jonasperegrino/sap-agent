@@ -49,3 +49,16 @@ def test_streamlit_app_boots_without_playwright() -> None:
     assert proc.returncode == 0, proc.stderr
     assert "Traceback" not in proc.stderr
     assert "boot ok" in proc.stdout
+
+
+def test_demo_case_and_ui_markup_load_without_playwright() -> None:
+    # The scripted investigation must keep working when the browser stack is down.
+    proc = _run(
+        "from sap_agent import demo_case as d; from sap_agent.ui import components as ui; "
+        "r = d.analyze_demo_ingestion(); "
+        "assert d.matches_demo_question(d.QUESTION); "
+        "assert 'normalization skipped' in ui.evidence_html(d.trace_rows(r)); "
+        "print('demo ok')"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "demo ok" in proc.stdout
