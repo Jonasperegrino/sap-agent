@@ -488,7 +488,8 @@ with tab_reports:
         st.subheader("SO-1024 · Currency mapping defect")
         _report_meta = st.columns([1, 1, 2])
         _report_meta[0].badge("HIGH · PRODUCT BUG", icon=":material/priority_high:", color="red")
-        _report_meta[1].badge("€960 variance", icon=":material/monitoring:", color="orange")
+        _variance = f"€{_report_result['discrepancy_eur']:,.0f} variance" if _report_result else "Variance"
+        _report_meta[1].badge(_variance, icon=":material/monitoring:", color="orange")
         _report_meta[2].badge("Backend diagnostic · simulated", icon=":material/terminal:", color="blue")
         if _report_result:
             _case = _report_result["case"]
@@ -497,7 +498,9 @@ with tab_reports:
                 f"**{_case['source_currency']} {_case['source_amount']:,.2f}** via "
                 f"`{_case['ingestion_path']}`. Currency normalization was skipped: the order row shows "
                 f"{_eur(_case['display_amount_eur'])}, but the dashboard counts "
-                f"{_eur(_case['stored_amount_eur'])}."
+                f"{_eur(_case['stored_amount_eur'])}. Total Value reads "
+                f"{_eur(_case['dashboard_total_eur'])} against {_eur(_case['order_rows_sum_eur'])} "
+                f"in the order rows — **{_report_result['overstatement_pct']:.1f}% too high**."
             )
             st.warning(f"**Recommended action · hold revenue report**\n\n{_report_result['decision']}")
 

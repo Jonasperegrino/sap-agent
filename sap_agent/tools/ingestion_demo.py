@@ -1,7 +1,8 @@
 """Deterministic demo case for a non-EU currency mapping defect.
 
 This is a simulated backend diagnostic, not a live SAP ingestion service.
-Keep the sample values aligned with the SO-1024 record in sap-fiori/data/sales.json.
+Keep the sample values aligned with the SO-1024 record in sap-fiori/data/sales.json
+and with the dashboard totals that record produces (Total Value vs. sum of amounts).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ class DemoCase(TypedDict):
     ingestion_path: str
     status: str
     order_date: str
+    dashboard_total_eur: float
+    order_rows_sum_eur: float
     demo_only: bool
 
 
@@ -43,6 +46,7 @@ class DemoResult(TypedDict):
     case: DemoCase
     expected_amount_eur: float
     discrepancy_eur: float
+    overstatement_pct: float
     frontend: Finding
     backend: BackendFinding
     decision: str
@@ -52,14 +56,17 @@ CASE: DemoCase = {
     "customer": "Aster BioMed Brazil",
     "customer_id": "C-1011",
     "order_id": "SO-1024",
-    "source_amount": 12000.0,
-    "source_currency": "USD",
-    "fx_rate_to_eur": 0.92,
-    "display_amount_eur": 11040.0,
-    "stored_amount_eur": 12000.0,
+    "source_amount": 25000.0,
+    "source_currency": "BRL",
+    "fx_rate_to_eur": 0.16,
+    "display_amount_eur": 4000.0,
+    "stored_amount_eur": 25000.0,
     "ingestion_path": "non_eu_v2",
     "status": "Approved",
     "order_date": "2026-10-02",
+    # Seeded dashboard snapshot: Total Value KPI vs. the sum of the Amount column.
+    "dashboard_total_eur": 194956.5,
+    "order_rows_sum_eur": 173956.5,
     "demo_only": True,
 }
 
@@ -81,11 +88,14 @@ def analyze_demo_ingestion() -> DemoResult:
     expected = round(CASE["source_amount"] * CASE["fx_rate_to_eur"], 2)
     actual = float(CASE["stored_amount_eur"])
     discrepancy = round(actual - expected, 2)
+    # Share of the true total (sum of the order rows) by which the KPI is overstated.
+    overstatement_pct = round(discrepancy / CASE["order_rows_sum_eur"] * 100, 1)
     return {
         "question": QUESTION,
         "case": CASE.copy(),
         "expected_amount_eur": expected,
         "discrepancy_eur": discrepancy,
+        "overstatement_pct": overstatement_pct,
         "frontend": {
             "finding": "dashboard_kpi_mismatch",
             "severity": "high",
@@ -131,7 +141,9 @@ def report_markdown(result: DemoResult | None = None) -> str:
         f"{backend['actual']}\n\n"
         f"Ingestion path: `{case['ingestion_path']}`. Order: `{case['order_id']}` for {case['customer']} "
         f"(`{case['customer_id']}`).\n\n"
-        f"**KPI overstatement:** €{result['discrepancy_eur']:,.2f}.\n\n"
+        f"**KPI overstatement:** €{result['discrepancy_eur']:,.2f} — dashboard Total Value "
+        f"€{case['dashboard_total_eur']:,.2f} vs. €{case['order_rows_sum_eur']:,.2f} summed from the order rows "
+        f"({result['overstatement_pct']:.1f}% too high).\n\n"
         "## Reproduction\n\n"
         "1. Open the Sales Dashboard and compare the order row with Total Value.\n"
         f"2. Inspect `{case['order_id']}` source currency and the pinned demo FX rate.\n"

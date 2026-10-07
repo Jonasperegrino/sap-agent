@@ -57,7 +57,12 @@ _EXTRACT_ALL_SCRIPT = """(maxRows) => {
     const trs = table.querySelectorAll('tbody tr, [role="row"]');
     for (const tr of trs) {
       if (rows.length >= maxRows) break;
-      const cells = Array.from(tr.querySelectorAll('td, [role="cell"]')).map((c) => (c.innerText || '').trim());
+      // sap.m rows wrap the data cells in control cells (highlight, selection,
+      // navigation). Those have no header, so reading them shifts every value
+      // one column to the right — take the data cells only when present.
+      const dataCells = tr.querySelectorAll('td.sapMListTblCell');
+      const cellEls = dataCells.length ? dataCells : tr.querySelectorAll('td, [role="cell"]');
+      const cells = Array.from(cellEls).map((c) => (c.innerText || '').trim());
       if (!cells.length || !cells.some((c) => c)) continue;
       if (cols.length) {
         while (cells.length < cols.length) cells.push('');
