@@ -12,6 +12,7 @@ import streamlit as st
 
 from sap_agent import demo_case as demo
 from sap_agent.ui import components as ui
+from sap_agent.ui.regression import regression_test_source
 
 # Must be the first Streamlit call.
 st.set_page_config(page_title="Atlas for SAP", page_icon="◈", layout="centered")
@@ -255,6 +256,10 @@ with tab_ask:
                     mime="text/markdown",
                     key="download_demo_report_from_ask",
                 )
+            if st.button("Regression test", key="regression_test_toggle"):
+                st.session_state["show_regression_test"] = not st.session_state.get("show_regression_test", False)
+            if st.session_state.get("show_regression_test"):
+                st.code(regression_test_source(_demo_result), language="python")
             st.html(ui.note_html(_DEMO_NOTE))
 
     res = st.session_state.get("last_result")
