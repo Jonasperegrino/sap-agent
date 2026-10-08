@@ -140,10 +140,6 @@ def _demo_summary(result: dict[str, Any]) -> tuple[str, list[ui.Chip], str]:
     return lead, chips, "Recommended action · hold revenue report"
 
 
-_DEMO_NOTE = (
-    "Demo scenario. The Fiori figures come from a seeded snapshot of the demo app; the ingestion log is simulated."
-)
-
 _SHOW_INVESTIGATE_TAB = _os.environ.get("SAP_AGENT_SHOW_INVESTIGATE_TAB", "").strip().lower() in {
     "1",
     "true",
@@ -260,7 +256,6 @@ with tab_ask:
                 st.session_state["show_regression_test"] = not st.session_state.get("show_regression_test", False)
             if st.session_state.get("show_regression_test"):
                 st.code(regression_test_source(_demo_result), language="python")
-            st.html(ui.note_html(_DEMO_NOTE))
 
     res = st.session_state.get("last_result")
     if not _demo_result and res and res.answer:
@@ -334,7 +329,7 @@ def _render_investigate_tab() -> None:
             st.session_state["story_uc"] = "Currency bug"
             st.rerun()
     with _rr_l:
-        st.caption("Seeded Fiori snapshot · simulated backend diagnostic")
+        st.caption("Simulated backend diagnostic")
     uc = st.segmented_control("Scenario", ["Currency bug", "UC1", "UC2", "UC3"], default="Currency bug", key="story_uc")
     st.caption(_names.get(uc or "", ""))
     if uc == "Currency bug":
@@ -348,7 +343,7 @@ def _render_investigate_tab() -> None:
             import time as _time
 
             with st.status("Investigating order value…", expanded=True) as _status:
-                st.write("Reading the seeded Fiori order snapshot…")
+                st.write("Reading the Fiori order data…")
                 _time.sleep(_demo_delay())
                 st.write("Comparing the order row with the dashboard KPI…")
                 _result = analyze_demo_ingestion()
@@ -374,7 +369,7 @@ def _render_investigate_tab() -> None:
             with st.container(border=True):
                 _left, _right = st.columns([1, 2])
                 with _left:
-                    st.badge("Fiori snapshot · seeded case", icon=":material/monitoring:", color="orange")
+                    st.badge("Fiori dashboard", icon=":material/monitoring:", color="orange")
                     st.write("Fiori row and KPI disagree")
                     st.caption(f"{_case['order_id']} · {_case['customer']} · {_case['status']}")
                 with _right:
@@ -573,4 +568,3 @@ with tab_reports:
                 type="primary",
                 key="download_story_report_tab",
             )
-            st.html(ui.note_html(_DEMO_NOTE))

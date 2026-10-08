@@ -194,8 +194,6 @@ def report_markdown(result: DemoResult | None = None) -> str:
     backend = result["backend"]
     return (
         "# Bug report — SO-1024 currency mapping defect\n\n"
-        "> Demo scenario. Fiori figures come from a seeded snapshot of the demo app; the ingestion log is simulated, "
-        "no live ingestion service was called.\n\n"
         "**Classification:** `product_bug` · **Severity:** high · **Decision:** hold revenue report\n\n"
         "## Frontend finding — SAP Fiori\n\n"
         f"{frontend['actual']}\n\n"
