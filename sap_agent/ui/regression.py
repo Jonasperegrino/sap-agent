@@ -2,8 +2,9 @@
 
 Pure string builder (no Streamlit or Playwright import) so the generated test is
 unit-testable. The test asserts that the dashboard Total Value shows the same
-figure as the order-amount footer. It fails while the currency mapping defect is
-present and passes once the BRL order is converted at the demo rate.
+figure as the sum of amounts in the toolbar above the order table. It fails
+while the currency mapping defect is present and passes once the BRL order is
+converted at the demo rate.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from sap_agent.demo_case import CASE
 if TYPE_CHECKING:
     from sap_agent.demo_case import DemoResult
 
-APP_URL = "https://jonasperegrino.github.io/sap-fiori/"
+APP_URL = "https://fiori.example.com/"
 
 
 def _eur(value: float) -> str:
@@ -44,7 +45,7 @@ def test_total_value_matches_order_amounts(page: Page) -> None:
     page.goto(APP_URL)
     expected_total = "{expected}"
 
-    # The footer under the order table states the sum of the displayed amounts.
+    # The toolbar above the order table states the sum of the displayed amounts.
     expect(page.get_by_text(f"Sum of amounts {{expected_total}}")).to_be_visible()
 
     # The Total Value KPI must show the same figure.
